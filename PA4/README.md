@@ -3,24 +3,24 @@ README file for Programming Assignment 5  (C++ edition)
 
 Your directory should now contain the following files:
 
- Makefile	      -> [course dir]/assignments/PA5/Makefile
- README
- ast-lex.cc	      -> [course dir]/src/PA5/ast-lex.cc
- ast-parse.cc	      -> [course dir]/src/PA5/ast-parse.cc
- cgen-phase.cc	      -> [course dir]/src/PA5/cgen-phase.cc
- cgen.cc
- cgen.h
- cgen_supp.cc
- cool-tree.cc	      -> [course dir]/src/PA5/cool-tree.cc
- cool-tree.handcode.h
- dumptype.cc	      -> [course dir]/src/PA5/dumptype.cc
- emit.h
- example.cl
- handle_flags.cc      -> [course dir]/src/PA5/handle_flags.cc
- mycoolc	      -> [course dir]/src/PA5/mycoolc*
- stringtab.cc	      -> [course dir]/src/PA5/stringtab.cc
- tree.cc	      -> [course dir]/src/PA5/tree.cc
- utilities.cc	      -> [course dir]/src/PA5/utilities.cc
+- Makefile	      -> [course dir]/assignments/PA5/Makefile
+- README
+- ast-lex.cc	      -> [course dir]/src/PA5/ast-lex.cc
+- ast-parse.cc	      -> [course dir]/src/PA5/ast-parse.cc
+- cgen-phase.cc	      -> [course dir]/src/PA5/cgen-phase.cc
+- cgen.cc
+- cgen.h
+- cgen_supp.cc
+- cool-tree.cc	      -> [course dir]/src/PA5/cool-tree.cc
+- cool-tree.handcode.h
+- dumptype.cc	      -> [course dir]/src/PA5/dumptype.cc
+- emit.h
+- example.cl
+- handle_flags.cc      -> [course dir]/src/PA5/handle_flags.cc
+- mycoolc	      -> [course dir]/src/PA5/mycoolc*
+- stringtab.cc	      -> [course dir]/src/PA5/stringtab.cc
+- tree.cc	      -> [course dir]/src/PA5/tree.cc
+- utilities.cc	      -> [course dir]/src/PA5/utilities.cc
  *.d
 
 The include (.h) files for this assignment can be found in 
@@ -109,29 +109,37 @@ The include (.h) files for this assignment can be found in
 Instructions
 ------------
 
-	To compile your compiler and code generator type:
+To compile your compiler and code generator type:
 
-	% make cgen
+``` shell
+% make cgen
+```
 
-	To test your compiler, type:
+To test your compiler, type:
 
-	% ./mycoolc [-o output filename] <file1.cl> <file2.cl> ...
+``` shell
+% ./mycoolc [-o output filename] <file1.cl> <file2.cl> ...
+```
 
-	This command parses all the cool files given on the command
-	line, passes them through the semantic checker, and then hands
-	the program AST to your code generator.
+This command parses all the cool files given on the command
+line, passes them through the semantic checker, and then hands
+the program AST to your code generator.
 
-	To run your compiler on the file example.cl, type:
+To run your compiler on the file example.cl, type:
 
-	% make dotest
+``` shell
+% make dotest
+```
 
-	To run the produced code:
+To run the produced code:
 
-	% spim -file file1.s  /* or the output filename you chose */
+``` shell
+% spim -file file1.s  /* or the output filename you chose */
+```
 
 
-        Instructions for turning in the assignment will be posted on the
-        course web page.
+Instructions for turning in the assignment will be posted on the
+course web page.
 
-        GOOD LUCK!
+GOOD LUCK!
 
