@@ -24,87 +24,89 @@ Your directory should now contain the following files:
  *.d
 
 The include (.h) files for this assignment can be found in 
-[course dir]/include/PA5
+`[course dir]/include/PA5`
 
-	The Makefile contains targets for compiling and running your
-	program, as well as handing it in. DO NOT MODIFY.
+The Makefile contains targets for compiling and running your
+program, as well as handing it in. **DO NOT MODIFY**.
 
-	In example.cl you should write a correct Cool program which
-	tests as many aspects of the code generator as possible. It
-	should pass your code generator, and running spim on the
-	generated output should run the program correctly.
+In example.cl you should write a correct Cool program which
+tests as many aspects of the code generator as possible. It
+should pass your code generator, and running spim on the
+generated output should run the program correctly.
 
-	cgen.cc is the skeleton file for the code generator. This
-	skeleton is much larger than the ones for previous
-	assignments.  The skeleton provides three components of the
-	code generator:
+cgen.cc is the skeleton file for the code generator. This
+skeleton is much larger than the ones for previous
+assignments.  The skeleton provides three components of the
+code generator:
 
-		- functions to build the inheritance graph; (we supply
-		  this in case you didn't get this working for PA4)
+- functions to build the inheritance graph; (we supply
+this in case you didn't get this working for PA4)
 
-		- functions to emit global data and constants;
-		 
-		- functions to emit spim instructions; (we supply
-		  these last two to save you some tedious coding)
+- functions to emit global data and constants;
 
-	You should work to understand this code, and it will help you
-        write the rest of the code generator.
+- functions to emit spim instructions; (we supply
+these last two to save you some tedious coding)
 
-	cgen.h is the header file for the code generator. Feel free to
-	add anything you need.
+You should work to understand this code, and it will help you
+write the rest of the code generator.
 
-	cgen_supp.cc is general support code for the code generator.
-	You can add functions as you see fit, but do not modify the 3
-	functions:
+cgen.h is the header file for the code generator. Feel free to
+add anything you need.
 
-		o byte_mode
-		o ascii_mode
-		o emit_string_constant
+cgen_supp.cc is general support code for the code generator.
+You can add functions as you see fit, but do not modify the 3
+functions:
 
-	emit.h defines a bunch of macros which should come in handy
-	when you actually want to emit code. Feel free to change
-	anything here to suit your needs.
+- byte_mode
+- ascii_mode
+- emit_string_constant
 
-        cgen-phase.cc supplies the driver for the compiler. You should
-        not modify this code.  The script mycoolc can pass any of the
-        standard flags to the code generator; for this assignment, -c
-        (code generator debug) may be useful as it sets a global
-        variable cgen_debug to true (1).  If you want your code
-        generator to print debug information when the option is set,
-        write your debug code in the following format:
+emit.h defines a bunch of macros which should come in handy
+when you actually want to emit code. Feel free to change
+anything here to suit your needs.
 
-	      if (cgen_debug)
-	      {
-		...
-	      }
+cgen-phase.cc supplies the driver for the compiler. You should
+not modify this code.  The script mycoolc can pass any of the
+standard flags to the code generator; for this assignment, -c
+(code generator debug) may be useful as it sets a global
+variable cgen_debug to true (1).  If you want your code
+generator to print debug information when the option is set,
+write your debug code in the following format:
 
-	symtab.h contains a symbol table implementation. You may
-        modify this file if you'd like.  To do so, remove the link and
-        copy `[course dir]/include/PA5/symtab.h' to your local
-        directory.
+``` c
+if (cgen_debug)
+{
+...
+}
+```
 
-	cool.h contains definitions that are used by almost all parts
-	of the compiler. DO NOT MODIFY.
+symtab.h contains a symbol table implementation. You may
+modify this file if you'd like.  To do so, remove the link and
+copy `[course dir]/include/PA5/symtab.h' to your local
+directory.
 
-        tree.h contains the base class `tree_node' of the AST nodes.
+cool.h contains definitions that are used by almost all parts
+of the compiler. DO NOT MODIFY.
 
-        cool-tree.cc, cool-tree.h, and cool-tree.handcode.h contain
-        the declarations and definitions of code generation AST nodes.
-        You may add fields as you wish, but you shouldn't modify any
-        of the methods already there except `code', which you may
-        modify or remove as you wish.  Note that cool-tree.handcode.h
-        is different from the same file in PA4---this file contains
-        function definitions needed for the cgen.cc skeleton.  You may
-        modify cool-tree.h or cool-tree.handcode.h, but don't modify
-        cool-tree.cc.  Place all method definitions in cgen.cc
+tree.h contains the base class `tree_node' of the AST nodes.
 
-	stringtab.h contains functions to manipulate the string table.
-	DO NOT MODIFY.
+cool-tree.cc, cool-tree.h, and cool-tree.handcode.h contain
+the declarations and definitions of code generation AST nodes.
+You may add fields as you wish, but you shouldn't modify any
+of the methods already there except `code', which you may
+modify or remove as you wish.  Note that cool-tree.handcode.h
+is different from the same file in PA4---this file contains
+function definitions needed for the cgen.cc skeleton.  You may
+modify cool-tree.h or cool-tree.handcode.h, but don't modify
+cool-tree.cc.  Place all method definitions in cgen.cc
 
-	dumptype.cc contains functions for printing out an abstract
-	syntax tree.  DO NOT MODIFY.
+stringtab.h contains functions to manipulate the string table.
+DO NOT MODIFY.
 
-        *.d dependency files, generated automatically by the makefile.
+dumptype.cc contains functions for printing out an abstract
+syntax tree.  DO NOT MODIFY.
+
+*.d dependency files, generated automatically by the makefile.
 
 Instructions
 ------------
