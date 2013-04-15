@@ -116,6 +116,13 @@ static char *gc_collect_names[] =
 BoolConst falsebool(FALSE);
 BoolConst truebool(TRUE);
 
+namespace{
+    void gen_dispTable_info(const char* name){
+        Symbol name = idtable.lookup_string(STRINGNAME);
+        s << name << DISPTAB_SUFFIX;
+    }
+}
+
 //*********************************************************
 //
 // Define method for code generation
@@ -391,23 +398,23 @@ void StringEntry::code_ref(ostream& s)
 
 void StringEntry::code_def(ostream& s, int stringclasstag)
 {
-  IntEntryP lensym = inttable.add_int(len);
+    IntEntryP lensym = inttable.add_int(len);
 
-  // Add -1 eye catcher
-  s << WORD << "-1" << endl;
+    // Add -1 eye catcher
+    s << WORD << "-1" << endl;
 
-  code_ref(s);  s  << LABEL                                             // label
-      << WORD << stringclasstag << endl                                 // tag
-      << WORD << (DEFAULT_OBJFIELDS + STRING_SLOTS + (len+4)/4) << endl // size
-      << WORD;
+    code_ref(s);  s  << LABEL                                             // label
+        << WORD << stringclasstag << endl                                 // tag
+        << WORD << (DEFAULT_OBJFIELDS + STRING_SLOTS + (len+4)/4) << endl // size
+        << WORD;
 
+    //disp_table
+    gen_dispTable_info(STRINGNAME);
 
- /***** Add dispatch information for class String ******/
-
-      s << endl;                                              // dispatch table
-      s << WORD;  lensym->code_ref(s);  s << endl;            // string length
-  emit_string_constant(s,str);                                // ascii string
-  s << ALIGN;                                                 // align to word
+    s << endl;                                              // dispatch table
+    s << WORD;  lensym->code_ref(s);  s << endl;            // string length
+    emit_string_constant(s,str);                                // ascii string
+    s << ALIGN;                                                 // align to word
 }
 
 //
@@ -436,18 +443,18 @@ void IntEntry::code_ref(ostream &s)
 
 void IntEntry::code_def(ostream &s, int intclasstag)
 {
-  // Add -1 eye catcher
-  s << WORD << "-1" << endl;
+    // Add -1 eye catcher
+    s << WORD << "-1" << endl;
 
-  code_ref(s);  s << LABEL                                // label
-      << WORD << intclasstag << endl                      // class tag
-      << WORD << (DEFAULT_OBJFIELDS + INT_SLOTS) << endl  // object size
-      << WORD; 
+    code_ref(s);  s << LABEL                                // label
+        << WORD << intclasstag << endl                      // class tag
+        << WORD << (DEFAULT_OBJFIELDS + INT_SLOTS) << endl  // object size
+        << WORD; 
 
- /***** Add dispatch information for class Int ******/
+    gen_dispTable_info(INTNAME);
 
-      s << endl;                                          // dispatch table
-      s << WORD << str << endl;                           // integer value
+    s << endl;                                          // dispatch table
+    s << WORD << str << endl;                           // integer value
 }
 
 
@@ -480,18 +487,18 @@ void BoolConst::code_ref(ostream& s) const
 
 void BoolConst::code_def(ostream& s, int boolclasstag)
 {
-  // Add -1 eye catcher
-  s << WORD << "-1" << endl;
+    // Add -1 eye catcher
+    s << WORD << "-1" << endl;
 
-  code_ref(s);  s << LABEL                                  // label
-      << WORD << boolclasstag << endl                       // class tag
-      << WORD << (DEFAULT_OBJFIELDS + BOOL_SLOTS) << endl   // object size
-      << WORD;
+    code_ref(s);  s << LABEL                                  // label
+        << WORD << boolclasstag << endl                       // class tag
+        << WORD << (DEFAULT_OBJFIELDS + BOOL_SLOTS) << endl   // object size
+        << WORD;
 
- /***** Add dispatch information for class Bool ******/
+    gen_dispTable_info(BOOLNAME);
 
-      s << endl;                                            // dispatch table
-      s << WORD << val << endl;                             // value (0 or 1)
+    s << endl;                                            // dispatch table
+    s << WORD << val << endl;                             // value (0 or 1)
 }
 
 //////////////////////////////////////////////////////////////////////////////

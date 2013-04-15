@@ -17,8 +17,14 @@ PA*/grading
 PA*/*.d
 PA*/*.o
 
+# Intermediate outputs
+PA*/*.s
+PA*/tags
+
 #outputs
 PA1/lexer
 PA2/parser
 PA3/semant
 PA4/cgen
+
+PA*/*.swp

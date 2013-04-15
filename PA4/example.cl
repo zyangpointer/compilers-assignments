@@ -1,9 +1,26 @@
+Class B {
+  s:String <- "hello";
+  g(y:String) : Int{
+    y.concat(s).length()
+  };
+  f(x:Int) : Int {
+    x+1
+  };
+};
 
-(*  Example cool program testing as many aspects of the code generator
-    as possible.
- *)
-
+Class A inherits B {
+  a : Int;
+  b : B <- new B;
+  f (x:Int) : Int {
+    x + a
+  };
+};
+ 
 class Main {
-  main():Int { 0 };
+  obj : A;
+  main():Int {{ 
+    obj  <- new A;
+    obj.f(1);
+  }};
 };
 
