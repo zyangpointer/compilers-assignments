@@ -18,9 +18,13 @@ class CgenClassTable : public SymbolTable<Symbol,CgenNode> {
 private:
    List<CgenNode> *nds;
    ostream& str;
-   int stringclasstag;
+
+   //object tag ids for builtins
+   int objectclasstag;
+   int ioclasstag;
    int intclasstag;
    int boolclasstag;
+   int stringclasstag;
 
 
 // The following methods emit code for
@@ -31,6 +35,11 @@ private:
    void code_bools(int);
    void code_select_gc();
    void code_constants();
+
+   void code_class_nameTab();
+   void code_class_objTab();
+   void code_class_dispTab();
+   void code_protObj();
 
 // The following creates an inheritance graph from
 // a list of classes.  The graph is implemented as
@@ -66,6 +75,8 @@ public:
    void set_parentnd(CgenNodeP p);
    CgenNodeP get_parentnd() { return parentnd; }
    int basic() { return (basic_status == Basic); }
+
+   Symbol get_name() { return name;}
 };
 
 class BoolConst 
