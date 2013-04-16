@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
+#include <vector>
 #include "emit.h"
 #include "cool-tree.h"
 #include "symtab.h"
@@ -58,13 +59,15 @@ public:
 };
 
 
+typedef std::vector<std::pair<Symbol, Symbol> > FeatureNameList;
+typedef std::vector<CgenNodeP>   AncestorList;
+
 class CgenNode : public class__class {
 private: 
    CgenNodeP parentnd;                        // Parent of class
    List<CgenNode> *children;                  // Children of class
    Basicness basic_status;                    // `Basic' if class is basic
                                               // `NotBasic' otherwise
-
 public:
    CgenNode(Class_ c,
             Basicness bstatus,
@@ -77,6 +80,15 @@ public:
    int basic() { return (basic_status == Basic); }
 
    Symbol get_name() { return name;}
+
+
+   void build_ancestors();
+
+   //return method or attribute list
+   FeatureNameList get_feature_list(bool check_on_method = true);
+
+private:
+   AncestorList m_ancestors;
 };
 
 class BoolConst 

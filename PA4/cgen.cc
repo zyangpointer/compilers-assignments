@@ -26,6 +26,9 @@
 #include "cgen_gc.h"
 
 #include <sstream>
+#include <vector>
+#include <algorithm>
+#include <tr1/functional>
 
 extern void emit_string_constant(ostream& str, char *s);
 extern int cgen_debug;
@@ -884,15 +887,33 @@ void CgenClassTable::code_class_nameTab(){
 }
 
 void CgenClassTable::code_class_objTab(){
-
+    str << CLASSOBJTAB << LABEL;
+    for(List<CgenNode> *l = nds; l; l = l->tl()){
+        CgenNode* hdr = l->hd();
+        str << WORD << hdr->get_name() << PROTOBJ_SUFFIX << endl;
+        str << WORD << hdr->get_name() << CLASSINIT_SUFFIX << endl;
+    }
 }
 
 void CgenClassTable::code_class_dispTab(){
+    typedef std::vector<CgenNodeP> AncestorList;
+    for(List<CgenNode> *l = nds; l; l = l->tl()){
+        CgenNode* clsNodePtr = l->hd();
+        Symbol clsName = clsNodePtr->get_name();
 
+        clsNodePtr->build_ancestors();
+        FeatureNameList feature_list = clsNodePtr->get_feature_list();
+        str << clsName << DISPTAB_SUFFIX << LABEL << endl;
+        for (FeatureNameList::iterator it = feature_list.begin(), itEnd = feature_list.end();
+                it != itEnd; ++it){
+            str << WORD << it->first << "." << it->second << endl;
+        }
+    }
 }
 
-void CgenClassTable::code_protObj(){
 
+void CgenClassTable::code_protObj(){
+    //TODO: add here with more code!
 }
 
 ///////////////////////////////////////////////////////////////////////
@@ -910,6 +931,67 @@ CgenNode::CgenNode(Class_ nd, Basicness bstatus, CgenClassTableP ct) :
    stringtable.add_string(name->get_string());          // Add class name to string table
 }
 
+void CgenNode::build_ancestors(){
+    CgenNodeP ptr = get_parentnd();
+    while (ptr != NULL){
+        m_ancestors.push_back(ptr);
+        ptr = ptr->get_parentnd();
+    }
+    //From top to bottom
+    std::reverse(m_ancestors.begin(), m_ancestors.end());
+}
+
+
+namespace{
+    bool name_matches(Symbol method_name, FeatureNameList::value_type& method){
+        return method.second == method_name;
+    }
+
+    void check_and_add_methods(FeatureNameList& features_list, Features& features, Symbol clsName){
+        for (int i = features->first(); features->more(i); i = features->next(i)){
+            method_class* method = dynamic_cast<method_class*>(features->nth(i));
+            if (method){
+                //All parent classes already checked due to sorting
+                FeatureNameList::iterator itMethod = std::find_if(features_list.begin(), 
+                        features_list.end(), std::tr1::bind(name_matches, method->name, 
+                            std::tr1::placeholders::_1));
+                if (itMethod == features_list.end()){
+                    features_list.push_back(std::make_pair(clsName, method->name));
+                }else{
+                    //override by current parent
+                    itMethod->first = clsName;
+                }
+            }else{
+                //No process
+            }
+        }
+    }
+
+}
+
+FeatureNameList CgenNode::get_feature_list(bool check_on_method){
+    FeatureNameList features_list;
+    for (AncestorList::iterator it = m_ancestors.begin(), itEnd = m_ancestors.end();
+            it != itEnd; ++it){
+        CgenNodeP ancestor = *it;
+        Symbol clsName = ancestor->name;
+        if (ancestor && ancestor->features){
+            Features cls_features = ancestor->features;
+            check_and_add_methods(features_list, cls_features, clsName);
+        }else{
+            if (cgen_debug){
+                cout << "Bad ancestor found!" << __LINE__ << endl;
+            }
+        }
+    }
+    //add own attributes finally
+    check_and_add_methods(features_list, this->features, this->name);
+
+    if (cgen_debug){
+        cout << "Class " << name << ": number of methods:" << features_list.size() << endl;
+    }
+    return features_list;
+}
 
 //******************************************************************
 //
