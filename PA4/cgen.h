@@ -89,6 +89,7 @@ public:
 
 private:
    AncestorList m_ancestors;
+   bool         m_ancestorsBuilt;
 };
 
 class BoolConst 

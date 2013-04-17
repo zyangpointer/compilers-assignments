@@ -15,6 +15,11 @@ Class A inherits B {
     x + a
   };
 };
+
+Class C {
+  objA : A;
+  objB : B;
+};
  
 class Main {
   obj : A;

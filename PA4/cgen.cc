@@ -896,14 +896,13 @@ void CgenClassTable::code_class_objTab(){
 }
 
 void CgenClassTable::code_class_dispTab(){
-    typedef std::vector<CgenNodeP> AncestorList;
     for(List<CgenNode> *l = nds; l; l = l->tl()){
         CgenNode* clsNodePtr = l->hd();
         Symbol clsName = clsNodePtr->get_name();
 
         clsNodePtr->build_ancestors();
         FeatureNameList feature_list = clsNodePtr->get_feature_list();
-        str << clsName << DISPTAB_SUFFIX << LABEL << endl;
+        str << clsName << DISPTAB_SUFFIX << LABEL;
         for (FeatureNameList::iterator it = feature_list.begin(), itEnd = feature_list.end();
                 it != itEnd; ++it){
             str << WORD << it->first << "." << it->second << endl;
@@ -912,8 +911,60 @@ void CgenClassTable::code_class_dispTab(){
 }
 
 
+namespace{
+    typedef std::vector<std::pair<Symbol, int> > ClassTagTable;
+    bool does_className_match(const ClassTagTable::value_type& item, Symbol clsName){
+        return item.first == clsName;
+    }
+}
+
 void CgenClassTable::code_protObj(){
-    //TODO: add here with more code!
+    //identify a tag first
+    ClassTagTable clsTagList;
+    clsTagList.push_back(std::make_pair(Object, objectclasstag));
+    clsTagList.push_back(std::make_pair(IO, ioclasstag));
+    clsTagList.push_back(std::make_pair(Int, intclasstag));
+    clsTagList.push_back(std::make_pair(Bool, boolclasstag));
+    clsTagList.push_back(std::make_pair(Str, stringclasstag));
+    int tag = stringclasstag + 1;
+    for(List<CgenNode> *l = nds; l; l = l->tl()){
+        CgenNode* node = l->hd();
+        if (!(node->basic())){
+            clsTagList.push_back(std::make_pair(node->name, tag++)); 
+        }
+    }
+
+    for(List<CgenNode> *l = nds; l; l = l->tl()){
+        CgenNode* clsNodePtr = l->hd();
+        Symbol clsName = clsNodePtr->get_name();
+
+
+        ClassTagTable::iterator it = std::find_if(clsTagList.begin(), clsTagList.end(),
+                std::tr1::bind(does_className_match, std::tr1::placeholders::_1, clsName));
+        if (it != clsTagList.end()){
+            str << WORD << "-1" << endl 
+                << clsName << PROTOBJ_SUFFIX << LABEL
+                << WORD << it->second << endl;
+
+            //We must get all attribute list to determinze its size
+            clsNodePtr->build_ancestors();
+            FeatureNameList feature_list = clsNodePtr->get_feature_list(false/*Fetch attributes*/);
+            str << WORD << (feature_list.size() + 3) << endl; //size = (-1) + tagId + dipTable + #attrs 
+            str << WORD << clsName << DISPTAB_SUFFIX << endl;
+
+            for (FeatureNameList::iterator it = feature_list.begin(), itEnd = feature_list.end();
+                    it != itEnd; ++it){
+                //str << WORD << it->first << "." << it->second << endl;
+            }
+        }else{
+            if (cgen_debug){
+                cout << __FILE__ << __LINE__ << endl;
+            }
+        }
+
+
+
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////
@@ -929,9 +980,13 @@ CgenNode::CgenNode(Class_ nd, Basicness bstatus, CgenClassTableP ct) :
    basic_status(bstatus)
 { 
    stringtable.add_string(name->get_string());          // Add class name to string table
+   m_ancestorsBuilt = false;
 }
 
 void CgenNode::build_ancestors(){
+    if (m_ancestorsBuilt)
+        return;
+
     CgenNodeP ptr = get_parentnd();
     while (ptr != NULL){
         m_ancestors.push_back(ptr);
@@ -939,6 +994,7 @@ void CgenNode::build_ancestors(){
     }
     //From top to bottom
     std::reverse(m_ancestors.begin(), m_ancestors.end());
+    m_ancestorsBuilt = true;
 }
 
 
@@ -947,16 +1003,17 @@ namespace{
         return method.second == method_name;
     }
 
+    template<typename FeatureType>
     void check_and_add_methods(FeatureNameList& features_list, Features& features, Symbol clsName){
         for (int i = features->first(); features->more(i); i = features->next(i)){
-            method_class* method = dynamic_cast<method_class*>(features->nth(i));
-            if (method){
+            FeatureType* feature = dynamic_cast<FeatureType*>(features->nth(i));
+            if (feature){
                 //All parent classes already checked due to sorting
                 FeatureNameList::iterator itMethod = std::find_if(features_list.begin(), 
-                        features_list.end(), std::tr1::bind(name_matches, method->name, 
+                        features_list.end(), std::tr1::bind(name_matches, feature->name, 
                             std::tr1::placeholders::_1));
                 if (itMethod == features_list.end()){
-                    features_list.push_back(std::make_pair(clsName, method->name));
+                    features_list.push_back(std::make_pair(clsName, feature->name));
                 }else{
                     //override by current parent
                     itMethod->first = clsName;
@@ -977,18 +1034,26 @@ FeatureNameList CgenNode::get_feature_list(bool check_on_method){
         Symbol clsName = ancestor->name;
         if (ancestor && ancestor->features){
             Features cls_features = ancestor->features;
-            check_and_add_methods(features_list, cls_features, clsName);
+            if (check_on_method){
+                check_and_add_methods<method_class>(features_list, cls_features, clsName);
+            }else{
+                check_and_add_methods<attr_class>(features_list, cls_features, clsName);
+            }
         }else{
             if (cgen_debug){
                 cout << "Bad ancestor found!" << __LINE__ << endl;
             }
         }
     }
-    //add own attributes finally
-    check_and_add_methods(features_list, this->features, this->name);
+    //add own features finally
+    if (check_on_method){
+        check_and_add_methods<method_class>(features_list, this->features, this->name);
+    }else{
+        check_and_add_methods<attr_class>(features_list, this->features, this->name);
+    }
 
     if (cgen_debug){
-        cout << "Class " << name << ": number of methods:" << features_list.size() << endl;
+        cout << "Class " << name << ": number of " << (check_on_method ? "methods:" : "attrs:") << (features_list.size()) << endl;
     }
     return features_list;
 }
