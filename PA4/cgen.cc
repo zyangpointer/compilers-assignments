@@ -838,11 +838,6 @@ void CgenClassTable::code()
     if (cgen_debug) cout << "coding constants" << endl;
     code_constants();
 
-    //                 Add your code to emit
-    //                   - prototype objects
-    //                   - class_nameTab
-    //                   - dispatch tables
-    //
     code_class_nameTab();
     code_class_objTab();
     code_class_dispTab();
@@ -851,11 +846,13 @@ void CgenClassTable::code()
     if (cgen_debug) cout << "coding global text" << endl;
     code_global_text();
 
+    code_class_initializers();
+    code_class_methods();
+
     //                 Add your code to emit
     //                   - object initializer
     //                   - the class methods
     //                   - etc...
-
 }
 
 
@@ -900,7 +897,6 @@ void CgenClassTable::code_class_dispTab(){
         CgenNode* clsNodePtr = l->hd();
         Symbol clsName = clsNodePtr->get_name();
 
-        clsNodePtr->build_ancestors();
         FeatureNameList feature_list = clsNodePtr->get_feature_list();
         str << clsName << DISPTAB_SUFFIX << LABEL;
         for (FeatureNameList::iterator it = feature_list.begin(), itEnd = feature_list.end();
@@ -948,7 +944,6 @@ void CgenClassTable::code_protObjs(){
                 << WORD << it->second << endl;
 
             //We must get all attribute list to determinze its size
-            clsNodePtr->build_ancestors();
             FeatureNameList feature_list = clsNodePtr->get_feature_list(false/*Fetch attributes*/);
             str << WORD << (feature_list.size() + 3) << endl; //size = (-1) + tagId + dipTable + #attrs 
             str << WORD << clsName << DISPTAB_SUFFIX << endl;
@@ -994,6 +989,34 @@ void CgenClassTable::code_basic_protObj_attrs(Symbol name){
         //no attributes for Object/IO
     }
 }
+
+void CgenClassTableP::code_class_initializers(){
+    typedef std::vector<Symbol> initList;
+    for(List<CgenNode> *l = nds; l; l = l->tl()){
+        CgenNode* node = l->hd();
+        if (!(l->basic()) && (initList.find(node->name) == initList.end())){
+            AncestorList ancestors = node->get_ancestors();
+            FeatureNameList attrList = node->get_feature_list(false/* check on attribute */);
+            
+            //ancestors are already sorted from top to bottom
+            for (AncestorList::iterator it = ancestors.begin(), itEnd = ancestor.end();
+                    it != itEnd; ++it){
+                if (initList.find((*it)->name) != initList.end()){
+                    continue; //already generated 
+                }
+                //emit initializer
+
+            }
+            initList.push_back(node->name);
+        }
+    }
+
+}
+
+void CgenClassTableP::code_class_methods(){
+
+}
+
 ///////////////////////////////////////////////////////////////////////
 //
 // CgenNode methods
@@ -1010,6 +1033,7 @@ CgenNode::CgenNode(Class_ nd, Basicness bstatus, CgenClassTableP ct) :
    m_ancestorsBuilt = false;
 }
 
+//should be called after inheritance tree determined
 void CgenNode::build_ancestors(){
     if (m_ancestorsBuilt)
         return;
@@ -1061,6 +1085,8 @@ namespace{
 }
 
 FeatureNameList CgenNode::get_feature_list(bool check_on_method){
+    build_ancestors();
+
     FeatureNameList features_list;
     for (AncestorList::iterator it = m_ancestors.begin(), itEnd = m_ancestors.end();
             it != itEnd; ++it){

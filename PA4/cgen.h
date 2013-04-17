@@ -43,6 +43,8 @@ private:
    void code_basic_protObj_attrs(Symbol clsName);
    void code_protObjs();
 
+   void code_class_initializers();
+   void code_class_methods();
 // The following creates an inheritance graph from
 // a list of classes.  The graph is implemented as
 // a tree of `CgenNode', and class names are placed
@@ -84,12 +86,16 @@ public:
 
    Symbol get_name() { return name;}
 
-   void build_ancestors();
-
    //return method or attribute list
    FeatureNameList get_feature_list(bool check_on_method = true);
+   AncestorList get_ancestors(){ 
+       if (!m_ancestorsBuilt) build_ancestors();
+       return m_ancestors;
+   }
 
 private:
+   void build_ancestors();
+
    AncestorList m_ancestors;
    bool         m_ancestorsBuilt;
 };
