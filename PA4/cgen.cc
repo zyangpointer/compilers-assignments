@@ -846,7 +846,7 @@ void CgenClassTable::code()
     code_class_nameTab();
     code_class_objTab();
     code_class_dispTab();
-    code_protObj();
+    code_protObjs();
 
     if (cgen_debug) cout << "coding global text" << endl;
     code_global_text();
@@ -918,7 +918,7 @@ namespace{
     }
 }
 
-void CgenClassTable::code_protObj(){
+void CgenClassTable::code_protObjs(){
     //identify a tag first
     ClassTagTable clsTagList;
     clsTagList.push_back(std::make_pair(Object, objectclasstag));
@@ -938,7 +938,6 @@ void CgenClassTable::code_protObj(){
         CgenNode* clsNodePtr = l->hd();
         Symbol clsName = clsNodePtr->get_name();
 
-
         ClassTagTable::iterator it = std::find_if(clsTagList.begin(), clsTagList.end(),
                 std::tr1::bind(does_className_match, std::tr1::placeholders::_1, clsName));
         if (it != clsTagList.end()){
@@ -952,21 +951,27 @@ void CgenClassTable::code_protObj(){
             str << WORD << (feature_list.size() + 3) << endl; //size = (-1) + tagId + dipTable + #attrs 
             str << WORD << clsName << DISPTAB_SUFFIX << endl;
 
-            for (FeatureNameList::iterator it = feature_list.begin(), itEnd = feature_list.end();
-                    it != itEnd; ++it){
-                //str << WORD << it->first << "." << it->second << endl;
+            if (clsNodePtr->basic()){
+                //initialize basic class attributes
+                code_basic_protObj_attrs();
+            }else{
+                //TODO: initialize non-basic attributes
+                for (FeatureNameList::iterator it = feature_list.begin(), itEnd = feature_list.end();
+                        it != itEnd; ++it){
+                    //str << WORD << it->first << "." << it->second << endl;
+                }
             }
         }else{
             if (cgen_debug){
                 cout << __FILE__ << __LINE__ << endl;
             }
         }
-
-
-
     }
 }
 
+void CgenClassTable::code_basic_protObj_attrs(){
+    //TODO: add implementation to initialize attrs' 
+}
 ///////////////////////////////////////////////////////////////////////
 //
 // CgenNode methods

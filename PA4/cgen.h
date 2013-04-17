@@ -40,7 +40,8 @@ private:
    void code_class_nameTab();
    void code_class_objTab();
    void code_class_dispTab();
-   void code_protObj();
+   void code_basic_protObj_attrs();
+   void code_protObjs();
 
 // The following creates an inheritance graph from
 // a list of classes.  The graph is implemented as
@@ -52,6 +53,7 @@ private:
    void install_classes(Classes cs);
    void build_inheritance_tree();
    void set_relations(CgenNodeP nd);
+
 public:
    CgenClassTable(Classes, ostream& str);
    void code();
@@ -80,7 +82,6 @@ public:
    int basic() { return (basic_status == Basic); }
 
    Symbol get_name() { return name;}
-
 
    void build_ancestors();
 
