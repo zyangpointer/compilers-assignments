@@ -40,7 +40,7 @@ private:
    void code_class_nameTab();
    void code_class_objTab();
    void code_class_dispTab();
-   void code_basic_protObj_attrs();
+   void code_basic_protObj_attrs(Symbol clsName);
    void code_protObjs();
 
 // The following creates an inheritance graph from
@@ -61,7 +61,8 @@ public:
 };
 
 
-typedef std::vector<std::pair<Symbol, Symbol> > FeatureNameList;
+typedef std::pair<Symbol, Symbol> FeatureInfo; // <name, decltype/rettype>
+typedef std::vector<std::pair<CgenNodeP, FeatureInfo> > FeatureNameList;
 typedef std::vector<CgenNodeP>   AncestorList;
 
 class CgenNode : public class__class {

@@ -905,7 +905,7 @@ void CgenClassTable::code_class_dispTab(){
         str << clsName << DISPTAB_SUFFIX << LABEL;
         for (FeatureNameList::iterator it = feature_list.begin(), itEnd = feature_list.end();
                 it != itEnd; ++it){
-            str << WORD << it->first << "." << it->second << endl;
+            str << WORD << it->first->name << "." << it->second.first << endl;
         }
     }
 }
@@ -926,6 +926,8 @@ void CgenClassTable::code_protObjs(){
     clsTagList.push_back(std::make_pair(Int, intclasstag));
     clsTagList.push_back(std::make_pair(Bool, boolclasstag));
     clsTagList.push_back(std::make_pair(Str, stringclasstag));
+
+    //class tags start with stringclasstag + 1
     int tag = stringclasstag + 1;
     for(List<CgenNode> *l = nds; l; l = l->tl()){
         CgenNode* node = l->hd();
@@ -952,13 +954,21 @@ void CgenClassTable::code_protObjs(){
             str << WORD << clsName << DISPTAB_SUFFIX << endl;
 
             if (clsNodePtr->basic()){
-                //initialize basic class attributes
-                code_basic_protObj_attrs();
+                code_basic_protObj_attrs(clsName);
             }else{
-                //TODO: initialize non-basic attributes
                 for (FeatureNameList::iterator it = feature_list.begin(), itEnd = feature_list.end();
                         it != itEnd; ++it){
-                    //str << WORD << it->first << "." << it->second << endl;
+                    str << WORD;
+                    if (it->second.second == Str){
+                        StringEntry* entry = stringtable.lookup_string("");
+                        entry->code_ref(str);
+                    }else if (it->second.second == Int){
+                        IntEntry* entry = inttable.lookup_string("0");
+                        entry->code_ref(str);
+                    }else{
+                        str << "0";
+                    }
+                    str << endl;
                 }
             }
         }else{
@@ -969,8 +979,20 @@ void CgenClassTable::code_protObjs(){
     }
 }
 
-void CgenClassTable::code_basic_protObj_attrs(){
-    //TODO: add implementation to initialize attrs' 
+
+void CgenClassTable::code_basic_protObj_attrs(Symbol name){
+    if ((name == Int) || (name == Bool)){
+        str << WORD << "0" << endl;
+    }else if (name == Str){
+        //first attribute ref to int 0 - the default length of string is zero
+        IntEntry* entry = inttable.lookup_string("0");
+        str << WORD;
+        entry->code_ref(str);
+        str << endl; 
+        str << WORD << "0" << endl;
+    }else{
+        //no attributes for Object/IO
+    }
 }
 ///////////////////////////////////////////////////////////////////////
 //
@@ -1005,11 +1027,17 @@ void CgenNode::build_ancestors(){
 
 namespace{
     bool name_matches(Symbol method_name, FeatureNameList::value_type& method){
-        return method.second == method_name;
+        return method.second.first == method_name;
     }
 
+    template<typename T> Symbol get_type(const T& type){assert(!"don't instattiate!"); }
+    template<>
+    Symbol get_type(const method_class& method){return method.return_type;}
+    template<>
+    Symbol get_type(const attr_class& attr){return attr.type_decl;}
+
     template<typename FeatureType>
-    void check_and_add_methods(FeatureNameList& features_list, Features& features, Symbol clsName){
+    void check_and_add_features(FeatureNameList& features_list, Features& features, CgenNodeP clsNode){
         for (int i = features->first(); features->more(i); i = features->next(i)){
             FeatureType* feature = dynamic_cast<FeatureType*>(features->nth(i));
             if (feature){
@@ -1018,10 +1046,11 @@ namespace{
                         features_list.end(), std::tr1::bind(name_matches, feature->name, 
                             std::tr1::placeholders::_1));
                 if (itMethod == features_list.end()){
-                    features_list.push_back(std::make_pair(clsName, feature->name));
+                    features_list.push_back(std::make_pair(clsNode, 
+                        std::make_pair(feature->name, get_type(*feature))));
                 }else{
                     //override by current parent
-                    itMethod->first = clsName;
+                    itMethod->first = clsNode;
                 }
             }else{
                 //No process
@@ -1036,13 +1065,13 @@ FeatureNameList CgenNode::get_feature_list(bool check_on_method){
     for (AncestorList::iterator it = m_ancestors.begin(), itEnd = m_ancestors.end();
             it != itEnd; ++it){
         CgenNodeP ancestor = *it;
-        Symbol clsName = ancestor->name;
+        //Symbol clsName = ancestor->name;
         if (ancestor && ancestor->features){
             Features cls_features = ancestor->features;
             if (check_on_method){
-                check_and_add_methods<method_class>(features_list, cls_features, clsName);
+                check_and_add_features<method_class>(features_list, cls_features, ancestor);
             }else{
-                check_and_add_methods<attr_class>(features_list, cls_features, clsName);
+                check_and_add_features<attr_class>(features_list, cls_features, ancestor);
             }
         }else{
             if (cgen_debug){
@@ -1052,9 +1081,9 @@ FeatureNameList CgenNode::get_feature_list(bool check_on_method){
     }
     //add own features finally
     if (check_on_method){
-        check_and_add_methods<method_class>(features_list, this->features, this->name);
+        check_and_add_features<method_class>(features_list, this->features, this);
     }else{
-        check_and_add_methods<attr_class>(features_list, this->features, this->name);
+        check_and_add_features<attr_class>(features_list, this->features, this);
     }
 
     if (cgen_debug){
