@@ -45,6 +45,8 @@ private:
 
    void code_class_initializers();
    void code_class_methods();
+
+   void code_basic_class_initializers();
 // The following creates an inheritance graph from
 // a list of classes.  The graph is implemented as
 // a tree of `CgenNode', and class names are placed

@@ -990,18 +990,25 @@ void CgenClassTable::code_basic_protObj_attrs(Symbol name){
     }
 }
 
-void CgenClassTableP::code_class_initializers(){
-    typedef std::vector<Symbol> initList;
+void CgenClassTable::code_class_initializers(){
+    std::vector<Symbol> initList;
+    initList.push_back(Object);
+    initList.push_back(Int);
+    initList.push_back(Str);
+    initList.push_back(Bool);
+    initList.push_back(IO);
+    code_basic_class_initializers();
+
     for(List<CgenNode> *l = nds; l; l = l->tl()){
         CgenNode* node = l->hd();
-        if (!(l->basic()) && (initList.find(node->name) == initList.end())){
+        if (!(node->basic()) && (std::find(initList.begin(), initList.end(), node->name) == initList.end())){
             AncestorList ancestors = node->get_ancestors();
             FeatureNameList attrList = node->get_feature_list(false/* check on attribute */);
             
             //ancestors are already sorted from top to bottom
-            for (AncestorList::iterator it = ancestors.begin(), itEnd = ancestor.end();
+            for (AncestorList::iterator it = ancestors.begin(), itEnd = ancestors.end();
                     it != itEnd; ++it){
-                if (initList.find((*it)->name) != initList.end()){
+                if (std::find(initList.begin(), initList.end(), (*it)->name) != initList.end()){
                     continue; //already generated 
                 }
                 //emit initializer
@@ -1010,10 +1017,14 @@ void CgenClassTableP::code_class_initializers(){
             initList.push_back(node->name);
         }
     }
+}
+
+
+void CgenClassTable::code_basic_class_initializers(){
 
 }
 
-void CgenClassTableP::code_class_methods(){
+void CgenClassTable::code_class_methods(){
 
 }
 
