@@ -1035,8 +1035,20 @@ void CgenClassTable::code_class_initializers(){
                 //default parent is object is not specified
                 str << JAL << "Object_init" << endl;
             }
-            //TODO: check each attributes with initialization and generate code accordingly
-            // using get_attr_offset to decide absolute offset
+            Features fs = node->features;
+            for (int i = fs->first(); fs->more(i); i = fs->next(i)){
+                attr_class* attrPtr = dynamic_cast<attr_class*>(fs->nth(i));
+                if (!attrPtr){
+                    continue;
+                }else{
+                    // using get_attr_offset to decide absolute offset
+                    if (typeid(*attrPtr->init) != typeid(no_expr_class)){
+                        attrPtr->init->code(str);
+                        size_t offset = node->get_attr_offset(attrPtr->name);
+                        emit_store(ACC, offset, SELF, str);
+                    }
+                }
+            }
             emit_init_save_and_return(str);
         }
         initList.push_back(node->name);
@@ -1161,7 +1173,7 @@ FeatureNameList CgenNode::get_feature_list(bool check_on_method){
     }
     //build attribute map for offset calculation
     if (!m_attrMapBuilt){
-        size_t offset = 4; //(-1) + classid + size + dispTable
+        size_t offset = 3; //classid + size + dispTable
         for (FeatureNameList::iterator it = features_list.begin(), itEnd = features_list.end();
                 it != itEnd; ++it){
             m_attrMap[it->second.first] = offset++;
@@ -1249,13 +1261,19 @@ void bool_const_class::code(ostream& s)
   emit_load_bool(ACC, BoolConst(val), s);
 }
 
+
 void new__class::code(ostream &s) {
+    emit_partial_load_address(ACC, s);
+    s << type_name << PROTOBJ_SUFFIX << endl;
+    emit_jal("Object.copy", s);
+    s << JAL << type_name << CLASSINIT_SUFFIX << endl;
 }
 
 void isvoid_class::code(ostream &s) {
 }
 
 void no_expr_class::code(ostream &s) {
+    //do nothing 
 }
 
 void object_class::code(ostream &s) {

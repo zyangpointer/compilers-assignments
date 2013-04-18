@@ -100,7 +100,11 @@ public:
    }
 
    size_t get_attr_offset(Symbol name){
-       if (!m_attrMapBuilt || (m_attrMap.find(name) == m_attrMap.end())){
+       if (!m_attrMapBuilt){
+           get_feature_list(false); //check attributes to identify offset
+       }
+       if (m_attrMap.find(name) == m_attrMap.end()){
+           assert(!"Should never reach here!");
            return 0;
        }else{
            return m_attrMap[name];
