@@ -990,6 +990,27 @@ void CgenClassTable::code_basic_protObj_attrs(Symbol name){
     }
 }
 
+
+namespace{
+    void emit_init_save_active_records(ostream& strm){
+        emit_addiu(SP, SP, -12, strm);
+        emit_store(FP, 3, SP, strm);
+        emit_store(SELF, 2, SP, strm);
+        emit_store(RA, 1, SP, strm);
+        emit_addiu(FP, SP, 4, strm);
+        emit_move(SELF, ACC, strm);
+    }
+
+    void emit_init_save_and_return(ostream& strm){
+        emit_move(ACC, SELF, strm);
+        emit_load(FP, 3, SP, strm);
+        emit_load(SELF, 2, SP, strm);
+        emit_load(RA, 1, SP, strm);
+        emit_addiu(SP, SP, 12, strm);
+        emit_return(strm);
+    }
+}
+
 void CgenClassTable::code_class_initializers(){
     std::vector<Symbol> initList;
     initList.push_back(Object);
@@ -1002,26 +1023,37 @@ void CgenClassTable::code_class_initializers(){
     for(List<CgenNode> *l = nds; l; l = l->tl()){
         CgenNode* node = l->hd();
         if (!(node->basic()) && (std::find(initList.begin(), initList.end(), node->name) == initList.end())){
-            AncestorList ancestors = node->get_ancestors();
-            FeatureNameList attrList = node->get_feature_list(false/* check on attribute */);
-            
-            //ancestors are already sorted from top to bottom
-            for (AncestorList::iterator it = ancestors.begin(), itEnd = ancestors.end();
-                    it != itEnd; ++it){
-                if (std::find(initList.begin(), initList.end(), (*it)->name) != initList.end()){
-                    continue; //already generated 
-                }
-                //emit initializer
-
+            //emit initializer
+            str << node->name << "_init" << LABEL;
+            emit_init_save_active_records(str);
+            CgenNode* parent = node->get_parentnd();
+            if (parent){
+                if (cgen_debug)
+                    cout << JAL << parent->name << "_init" << endl;
+                str << JAL << parent->name << "_init" << endl;
+            }else{
+                //default parent is object is not specified
+                str << JAL << "Object_init" << endl;
             }
-            initList.push_back(node->name);
+            //TODO: check each attributes with initialization and generate code accordingly
+            // using get_attr_offset to decide absolute offset
+            emit_init_save_and_return(str);
         }
+        initList.push_back(node->name);
     }
 }
 
 
 void CgenClassTable::code_basic_class_initializers(){
-
+    Symbol basics[] = {Object, Int, Bool, IO, Str};
+    for (size_t i = 0; i < sizeof(basics)/sizeof(basics[0]); ++i){
+        str << basics[i] << "_init" << LABEL;
+        emit_init_save_active_records(str);
+        if (basics[i] != Object){
+            emit_jal("Object_init", str);
+        }
+        emit_init_save_and_return(str);
+    }
 }
 
 void CgenClassTable::code_class_methods(){
@@ -1042,6 +1074,7 @@ CgenNode::CgenNode(Class_ nd, Basicness bstatus, CgenClassTableP ct) :
 { 
    stringtable.add_string(name->get_string());          // Add class name to string table
    m_ancestorsBuilt = false;
+   m_attrMapBuilt = false;
 }
 
 //should be called after inheritance tree determined
@@ -1125,6 +1158,14 @@ FeatureNameList CgenNode::get_feature_list(bool check_on_method){
 
     if (cgen_debug){
         cout << "Class " << name << ": number of " << (check_on_method ? "methods:" : "attrs:") << (features_list.size()) << endl;
+    }
+    //build attribute map for offset calculation
+    if (!m_attrMapBuilt){
+        size_t offset = 4; //(-1) + classid + size + dispTable
+        for (FeatureNameList::iterator it = features_list.begin(), itEnd = features_list.end();
+                it != itEnd; ++it){
+            m_attrMap[it->second.first] = offset++;
+        }
     }
     return features_list;
 }

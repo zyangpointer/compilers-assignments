@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <vector>
+#include <map>
 #include "emit.h"
 #include "cool-tree.h"
 #include "symtab.h"
@@ -69,6 +70,9 @@ typedef std::pair<Symbol, Symbol> FeatureInfo; // <name, decltype/rettype>
 typedef std::vector<std::pair<CgenNodeP, FeatureInfo> > FeatureNameList;
 typedef std::vector<CgenNodeP>   AncestorList;
 
+//attribute offset
+typedef std::map<Symbol, size_t> AttributeMap;
+
 class CgenNode : public class__class {
 private: 
    CgenNodeP parentnd;                        // Parent of class
@@ -95,11 +99,21 @@ public:
        return m_ancestors;
    }
 
+   size_t get_attr_offset(Symbol name){
+       if (!m_attrMapBuilt || (m_attrMap.find(name) == m_attrMap.end())){
+           return 0;
+       }else{
+           return m_attrMap[name];
+       }
+   }
+
 private:
    void build_ancestors();
 
    AncestorList m_ancestors;
+   AttributeMap m_attrMap;
    bool         m_ancestorsBuilt;
+   bool         m_attrMapBuilt;
 };
 
 class BoolConst 
