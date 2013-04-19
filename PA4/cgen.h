@@ -45,7 +45,7 @@ private:
    void code_protObjs();
 
    void code_class_initializers();
-   void code_class_methods();
+   void code_class_method_definitions();
 
    void code_basic_class_initializers();
 // The following creates an inheritance graph from

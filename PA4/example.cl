@@ -1,7 +1,7 @@
 Class B {
   s:String <- "hello";
-  g(y:String) : Int{
-    y.concat(s).length()
+  g(y:String, a:Int, b:Int, c:Int) : Int{
+    y.concat(s).length() + a + b + c
   };
   f(x:Int) : Int {
     x+1
@@ -22,10 +22,11 @@ Class C {
 };
  
 class Main {
-  obj : A;
+  obj : B;
   main():Int {{ 
     obj  <- new A;
     obj.f(1);
+    obj.g("world", 1, 2, 3);
   }};
 };
 

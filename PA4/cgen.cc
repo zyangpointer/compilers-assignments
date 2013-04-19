@@ -847,12 +847,7 @@ void CgenClassTable::code()
     code_global_text();
 
     code_class_initializers();
-    code_class_methods();
-
-    //                 Add your code to emit
-    //                   - object initializer
-    //                   - the class methods
-    //                   - etc...
+    code_class_method_definitions();
 }
 
 
@@ -1068,8 +1063,17 @@ void CgenClassTable::code_basic_class_initializers(){
     }
 }
 
-void CgenClassTable::code_class_methods(){
-
+void CgenClassTable::code_class_method_definitions(){
+    for(List<CgenNode> *l = nds; l; l = l->tl()){
+        CgenNode* clsPtr = l->hd();
+        Features fs = clsPtr->features;
+        for (int i = fs->first(); fs->more(i); i = fs->next(i)){
+            method_class* method = dynamic_cast<method_class*>(fs->nth(i));
+            if (method){
+                str << clsPtr->name << "." << method->name << LABEL;
+            }
+        }
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////
