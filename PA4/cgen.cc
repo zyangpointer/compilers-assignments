@@ -127,7 +127,6 @@ namespace{
     //variable table to svae locations for arguments and temporaries
     VarAddrTable g_varTable;
     size_t g_current_sp_offset = 0; //sp - fp
-
     CgenClassTable* g_clsTablePtr;
 
     size_t first_attr_offset = 3;
@@ -932,6 +931,39 @@ namespace{
     bool does_className_match(const ClassTagTable::value_type& item, Symbol clsName){
         return item.first == clsName;
     }
+    
+    void load_variable_to_a0(Symbol name, ostream& s){
+        CgenNodeP cls = g_clsTablePtr->lookup(SELF_TYPE);
+        if (!cls){
+            assert(!"Bad scope for object class!");
+        }
+        size_t offset = cls->get_attr_offset(name);
+        if (offset == 0){
+            //TODO: abstract this method!
+            if (g_varTable.find(name) != g_varTable.end()){
+                RegAddrInfo& info = g_varTable[name];
+                if (info.location == LOC_FP){
+                    s << LW << ACC << " " << info.offset * WORD_SIZE << "(" << FP << ")" << endl;
+                }else if (info.location == LOC_ARG){
+                    s << MOVE << ACC << " " << "$a" << info.offset << endl;
+                }else if (info.location == LOC_TEMP){
+                    s << MOVE << ACC << " " << "$t" << info.offset << endl;
+                }
+            }
+        }else{
+            emit_load(ACC, offset, SELF, s);
+        }
+    }
+
+    void new_location_for_symbol(Symbol name, char* reg, ostream& s){
+        //allocate space to save the new identifier
+        RegAddrInfo& addr = g_varTable[name];
+        addr.location = LOC_FP;
+        addr.offset = g_current_sp_offset++;
+
+        emit_store(reg, 0, SP, s);
+        emit_addiu(SP, SP, -4, s);
+    }
 }
 
 void CgenClassTable::code_protObjs(){
@@ -1313,12 +1345,41 @@ FeatureNameList CgenNode::get_feature_list(bool check_on_method){
 
 
 void assign_class::code(ostream &s) {
+    s << "\t# Assign begin..." << endl;
+    expr->code(s);
+
+    CgenNodeP cls = g_clsTablePtr->lookup(SELF_TYPE);
+    if (!cls){
+        assert(!"Bad scope for object class!");
+    }
+    size_t offset = cls->get_attr_offset(name);
+    if (offset == 0){
+        if (g_varTable.find(name) != g_varTable.end()){
+            RegAddrInfo& info = g_varTable[name];
+            if (info.location == LOC_FP){
+                s << SW << ACC << " " << info.offset * WORD_SIZE << "(" << FP << ")" << endl;
+            }else if (info.location == LOC_ARG){
+                s << SW << ACC << " " << "$a" << info.offset << endl;
+            }else if (info.location == LOC_TEMP){
+                s << SW << ACC << " " << "$t" << info.offset << endl;
+            }
+        }else{
+            assert(!"Name lookup error!");
+            return;
+        }
+    }else{
+        emit_store(ACC, offset, SELF, s);
+    }
+
+    s << "\t# Assign end..." << endl;
 }
 
 void static_dispatch_class::code(ostream &s) {
+    //TODO:
 }
 
 void dispatch_class::code(ostream &s) {
+    //TODO: refine this!
     //parent arguments' registers needs to be saved to be referenced later
     // other arguments in stack will not be touched
     s << "\t#@ dispatch prepare, save registers..." << endl;
@@ -1366,18 +1427,95 @@ void dispatch_class::code(ostream &s) {
 }
 
 void cond_class::code(ostream &s) {
+    pred->code(s);
+    //emit_save_temp_registers(s);
+    emit_move(T1, ACC, s);
+    emit_load(T1, first_attr_offset, T1, s);
+
+    int true_label = next_lable_id++;
+    int false_label = next_lable_id++;
+    emit_bne(T1, ZERO, true_label, s);
+    emit_branch(false_label, s);
+
+    int joint_label = next_lable_id++;
+    emit_label_def(true_label,s);
+    then_exp->code(s);
+    emit_move(T1, ACC, s);
+    emit_branch(joint_label, s);
+
+    emit_label_def(false_label, s);
+    else_exp->code(s);
+    emit_move(T1, ACC, s);
+    emit_branch(joint_label, s);
+
+    emit_label_def(joint_label, s);
+    //emit_restore_temp_registers(s);
 }
 
 void loop_class::code(ostream &s) {
+    //emit_save_temp_registers(s);
+
+    int begin_label = next_lable_id++;
+    emit_label_def(begin_label, s);
+
+    pred->code(s);
+    emit_move(T1, ACC, s);
+    emit_load(T1, first_attr_offset, T1, s);
+    
+    int true_label = next_lable_id++;
+    int false_label = next_lable_id++;
+    emit_bne(T1, ZERO, true_label, s);
+    emit_branch(false_label, s);
+
+    emit_label_def(true_label, s);
+    body->code(s);
+    emit_branch(begin_label, s);
+
+    //do nothing for false
+    emit_label_def(false_label, s);
+    //emit_restore_temp_registers(s);
 }
 
 void typcase_class::code(ostream &s) {
+    s << "\t#$$ typecase begin..." << endl;
+
+    expr->code(s);
+    emit_move(T1, ACC, s);
+
+    //select the cloest branch
+    int case_branch = -1;
+    branch_class* branch = NULL;
+    CgenNode* clsPtr = g_clsTablePtr->lookup(expr->get_type());
+    while(case_branch == -1){
+        for (int i = cases->first(); cases->more(i); i = cases->next(i)){
+            branch = dynamic_cast<branch_class*>(cases->nth(i));
+            if (clsPtr->name == branch->type_decl){
+                case_branch = i;
+            }
+        }
+
+        if (case_branch == -1){
+            clsPtr = clsPtr->get_parentnd();
+        }
+    }
+    
+    //allocate new location with value from T1
+    branch->expr->code(s);
+    new_location_for_symbol(branch->name, T1, s);
+
+    s << "\t#$$ typecase end..." << endl;
 }
 
 void block_class::code(ostream &s) {
+    for (int i = body->first(); body->more(i); i = body->next(i)){
+        body->nth(i)->code(s);
+    }
+    //last one in ACC already
 }
 
 void let_class::code(ostream &s) {
+    //TODO
+
 }
 
 
@@ -1386,7 +1524,6 @@ void let_class::code(ostream &s) {
     e1->code(s);\
     emit_jal("Object.copy", s);\
     emit_push(ACC, s);\
-    emit_save_temp_registers(s);\
     s << "\t#>> evaluate e2 to $t2" << endl;\
     e2->code(s);\
     emit_move(T2, ACC, s);\
@@ -1397,7 +1534,6 @@ void let_class::code(ostream &s) {
     com(T1, T1, T2, s);\
     s << "\t#>> store value to $a0 for return" << endl;\
     emit_store(T1, first_attr_offset, ACC, s);\
-    emit_restore_temp_registers(s);\
     s << "\t#" << name << " end!" << endl;
     
 void plus_class::code(ostream &s) {
@@ -1462,7 +1598,7 @@ void lt_class::code(ostream &s) {
 void eq_class::code(ostream &s) {
     s << "#@@@ Equal check begin..." << endl;
     e1->code(s);
-    emit_save_temp_registers(s);
+    //emit_save_temp_registers(s);
     emit_move(T1, ACC, s);
     e2->code(s);
     emit_move(T2, ACC, s);
@@ -1500,7 +1636,7 @@ void eq_class::code(ostream &s) {
     emit_branch(joint_label, s);
 
     emit_label_def(joint_label, s);
-    emit_restore_temp_registers(s);
+    //emit_restore_temp_registers(s);
     s << "#@@@ Equal check end..." << endl;
 }
 
@@ -1511,13 +1647,13 @@ void leq_class::code(ostream &s) {
 void comp_class::code(ostream &s) {
     s << "\t#@@@ Not begin..." << endl;
     e1->code(s);
-    emit_save_temp_registers(s);
+    //emit_save_temp_registers(s);
     emit_load(T1, first_attr_offset, ACC, s);
     emit_load_imm(T2, 1, s);
     emit_sub(T1, T2, T1, s); //1->0, 0->1
     emit_store(T1, first_attr_offset, ACC, s);
 
-    emit_restore_temp_registers(s);
+    //emit_restore_temp_registers(s);
     s << "\t#@@@ Not end..." << endl;
 }
 
@@ -1541,6 +1677,7 @@ void bool_const_class::code(ostream& s)
 
 
 void new__class::code(ostream &s) {
+    //TODO: refine this!
     emit_partial_load_address(ACC, s);
     s << type_name << PROTOBJ_SUFFIX << endl;
     emit_jal("Object.copy", s);
@@ -1548,6 +1685,7 @@ void new__class::code(ostream &s) {
 }
 
 void isvoid_class::code(ostream &s) {
+    //TODO
 }
 
 void no_expr_class::code(ostream &s) {
@@ -1555,26 +1693,8 @@ void no_expr_class::code(ostream &s) {
 }
 
 void object_class::code(ostream &s) {
-    s << "\t#@@@ object codegen..." << endl;
-    CgenNodeP cls = g_clsTablePtr->lookup(SELF_TYPE);
-    if (!cls){
-        assert(!"Bad scope for object class!");
-    }
-    size_t offset = cls->get_attr_offset(name);
-    if (offset == 0){
-        //TODO: abstract this method!
-        if (g_varTable.find(name) != g_varTable.end()){
-            RegAddrInfo& info = g_varTable[name];
-            if (info.location == LOC_FP){
-                s << LW << ACC << " " << info.offset * WORD_SIZE << "(" << FP << ")" << endl;
-            }else if (info.location == LOC_ARG){
-                s << MOVE << ACC << " " << "$a" << info.offset << endl;
-            }else if (info.location == LOC_TEMP){
-                s << MOVE << ACC << " " << "$t" << info.offset << endl;
-            }
-        }
-    }else{
-        emit_load(ACC, offset, SELF, s);
-    }
+    s << "\t#@@@ object begin..." << endl;
+    load_variable_to_a0(name, s);
+    s << "\t#@@@ object done..." << endl;
 }
 
