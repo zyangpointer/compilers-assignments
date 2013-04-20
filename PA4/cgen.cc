@@ -939,7 +939,6 @@ namespace{
         }
         size_t offset = cls->get_attr_offset(name);
         if (offset == 0){
-            //TODO: abstract this method!
             if (g_varTable.find(name) != g_varTable.end()){
                 RegAddrInfo& info = g_varTable[name];
                 if (info.location == LOC_FP){
@@ -1514,6 +1513,7 @@ void block_class::code(ostream &s) {
 }
 
 void let_class::code(ostream &s) {
+
     //TODO
 
 }
@@ -1574,17 +1574,17 @@ void neg_class::code(ostream &s) {
     emit_load(T1, first_attr_offset, ACC, s);\
     e2->code(s);\
     emit_load(T2, first_attr_offset, ACC, s);\
-    int true_branch = next_lable_id++;\
-    int false_branch = next_lable_id++;\
-    int joint_branch = next_lable_id++;\
-    comp(T1, ACC, true_branch, s);\
-    emit_label_def(true_branch, s);\
+    int true_label = next_lable_id++;\
+    int false_label = next_lable_id++;\
+    int joint_label = next_lable_id++;\
+    comp(T1, ACC, true_label, s);\
+    emit_label_def(true_label, s);\
     emit_load_bool(ACC, truebool, s);\
-    emit_branch(joint_branch, s);\
-    emit_label_def(false_branch, s);\
+    emit_branch(joint_label, s);\
+    emit_label_def(false_label, s);\
     emit_load_bool(ACC, falsebool, s);\
-    emit_branch(joint_branch, s);\
-    emit_label_def(joint_branch, s);\
+    emit_branch(joint_label, s);\
+    emit_label_def(joint_label, s);\
     emit_load(T1, 1, SP, s);\
     emit_load(T2, 2, SP, s);\
     emit_addiu(SP, SP, 8, s);\
@@ -1685,7 +1685,24 @@ void new__class::code(ostream &s) {
 }
 
 void isvoid_class::code(ostream &s) {
-    //TODO
+    int true_label = next_lable_id++;
+    int false_label = next_lable_id++;
+    
+    e1->code(s);
+    emit_move(T1, ACC, s);
+    emit_bne(T1, ZERO, true_label, s);
+    emit_branch(false_label, s);
+
+    int joint_label = next_lable_id++;
+    emit_label_def(true_label, s);
+    emit_load_bool(ACC, truebool, s);
+    emit_branch(joint_label, s);
+
+    emit_label_def(false_label, s);
+    emit_load_bool(ACC, falsebool, s);
+    emit_branch(joint_label, s);
+
+    emit_label_def(joint_label, s);
 }
 
 void no_expr_class::code(ostream &s) {
