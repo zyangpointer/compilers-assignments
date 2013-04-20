@@ -15,7 +15,6 @@ typedef CgenClassTable *CgenClassTableP;
 
 class CgenNode;
 typedef CgenNode *CgenNodeP;
-
 class CgenClassTable : public SymbolTable<Symbol,CgenNode> {
 private:
    List<CgenNode> *nds;
@@ -63,6 +62,7 @@ public:
    CgenClassTable(Classes, ostream& str);
    void code();
    CgenNodeP root();
+
 };
 
 
@@ -71,7 +71,7 @@ typedef std::vector<std::pair<CgenNodeP, FeatureInfo> > FeatureNameList;
 typedef std::vector<CgenNodeP>   AncestorList;
 
 //attribute offset
-typedef std::map<Symbol, size_t> AttributeMap;
+typedef std::map<Symbol, size_t> AttributeMap; //<name, offset>
 
 class CgenNode : public class__class {
 private: 
@@ -99,25 +99,18 @@ public:
        return m_ancestors;
    }
 
-   size_t get_attr_offset(Symbol name){
-       if (!m_attrMapBuilt){
-           get_feature_list(false); //check attributes to identify offset
-       }
-       if (m_attrMap.find(name) == m_attrMap.end()){
-           assert(!"Should never reach here!");
-           return 0;
-       }else{
-           return m_attrMap[name];
-       }
-   }
+   size_t get_attr_offset(Symbol name);
+   size_t get_method_offset(Symbol name);
 
 private:
    void build_ancestors();
 
    AncestorList m_ancestors;
    AttributeMap m_attrMap;
+   AttributeMap m_methodMap;
    bool         m_ancestorsBuilt;
    bool         m_attrMapBuilt;
+   bool         m_methodMapBuilt;
 };
 
 class BoolConst 

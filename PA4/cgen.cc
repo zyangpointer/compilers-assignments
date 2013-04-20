@@ -116,6 +116,21 @@ static char *gc_collect_names[] =
   { "_NoGC_Collect", "_GenGC_Collect", "_ScnGC_Collect" };
 
 
+namespace{
+    typedef enum{LOC_FP, LOC_ARG, LOC_TEMP} REG_LOC;
+    typedef struct{
+        unsigned short location;  // 0 - fp (fp + offset), 1 - a0,...a4, 2 - t0, t1, ..t9
+        unsigned short offset; 
+    }RegAddrInfo;
+    typedef std::map<Symbol, RegAddrInfo> VarAddrTable;
+
+    //variable table to svae locations for arguments and temporaries
+    VarAddrTable g_varTable;
+    size_t g_current_sp_offset = 0; //sp - fp
+
+    CgenClassTable* g_clsTablePtr;
+}
+
 //  BoolConst is a class that implements code generation for operations
 //  on the two booleans, which are given global names here.
 BoolConst falsebool(FALSE);
@@ -147,7 +162,7 @@ void program_class::cgen(ostream &os)
     //os << "# start of generated code\n";
 
     initialize_constants();
-    CgenClassTable *codegen_classtable = new CgenClassTable(classes,os);
+    g_clsTablePtr = new CgenClassTable(classes,os);
 
     //os << "\n# end of generated code\n";
 }
@@ -1021,6 +1036,7 @@ void CgenClassTable::code_class_initializers(){
             //emit initializer
             str << node->name << "_init" << LABEL;
             emit_init_save_active_records(str);
+            g_current_sp_offset = 1; //sp points to next unused 
             CgenNode* parent = node->get_parentnd();
             if (parent){
                 if (cgen_debug)
@@ -1071,6 +1087,31 @@ void CgenClassTable::code_class_method_definitions(){
             method_class* method = dynamic_cast<method_class*>(fs->nth(i));
             if (method){
                 str << clsPtr->name << "." << method->name << LABEL;
+
+                size_t numOfArgs = method->formals->len();
+                emit_init_save_active_records(str);
+
+                //save formal parameters' address for later reference
+                for (size_t i = 0; i < numOfArgs; ++i){
+                    formal_class* argInfo = dynamic_cast<formal_class*>(method->formals->nth(i));
+                    assert(argInfo);
+                    RegAddrInfo& addrInfo = g_varTable[argInfo->name];
+                    if (i < 3){
+                        //first 3 arguments saved in a1,a2,a3, self in a0
+                        addrInfo.location = LOC_ARG;
+                        addrInfo.offset = i; 
+                    }else{
+                        //Those arguments saved in stack below our fp and registers
+                        // below fp, 0:ra, -1:s0, -2:oldfp -3:3, -4:4
+                        //  ..., -i:arg(i), ..., -(n-1) : arg(n-1)
+                        addrInfo.location = LOC_FP;
+                        addrInfo.offset = -1 * i;
+                    }
+                }
+                method->expr->code(str);
+                //return object save in v0 now
+                emit_move(V1, ACC, str);
+                emit_init_save_and_return(str);
             }
         }
     }
@@ -1091,6 +1132,7 @@ CgenNode::CgenNode(Class_ nd, Basicness bstatus, CgenClassTableP ct) :
    stringtable.add_string(name->get_string());          // Add class name to string table
    m_ancestorsBuilt = false;
    m_attrMapBuilt = false;
+   m_methodMapBuilt = false;
 }
 
 //should be called after inheritance tree determined
@@ -1144,6 +1186,30 @@ namespace{
 
 }
 
+
+namespace{
+    size_t find_name(Symbol name, AttributeMap& tbl){
+        if (tbl.find(name) == tbl.end()){
+            assert(!"Should never reach here!");
+            return 0;
+        }
+        return tbl[name];
+    }
+}
+size_t CgenNode::get_attr_offset(Symbol name){
+       if (!m_attrMapBuilt){
+           get_feature_list(false); //check attributes to identify offset
+       }
+       return find_name(name, m_attrMap);
+}
+
+size_t CgenNode::get_method_offset(Symbol name){
+       if (!m_methodMapBuilt){
+           get_feature_list(false); //check attributes to identify offset
+       }
+       return find_name(name, m_methodMap);
+}
+
 FeatureNameList CgenNode::get_feature_list(bool check_on_method){
     build_ancestors();
 
@@ -1176,12 +1242,21 @@ FeatureNameList CgenNode::get_feature_list(bool check_on_method){
         cout << "Class " << name << ": number of " << (check_on_method ? "methods:" : "attrs:") << (features_list.size()) << endl;
     }
     //build attribute map for offset calculation
-    if (!m_attrMapBuilt){
+    if (!m_attrMapBuilt && !check_on_method){
         size_t offset = 3; //classid + size + dispTable
         for (FeatureNameList::iterator it = features_list.begin(), itEnd = features_list.end();
                 it != itEnd; ++it){
             m_attrMap[it->second.first] = offset++;
         }
+        m_attrMapBuilt = true;
+    }
+    if (!m_methodMapBuilt && check_on_method){
+        size_t offset = 0;
+        for (FeatureNameList::iterator it = features_list.begin(), itEnd = features_list.end();
+                it != itEnd; ++it){
+            m_methodMap[it->second.first] = offset++;
+        }
+        m_methodMapBuilt = true;
     }
     return features_list;
 }
@@ -1203,6 +1278,47 @@ void static_dispatch_class::code(ostream &s) {
 }
 
 void dispatch_class::code(ostream &s) {
+    //parent arguments' registers needs to be saved to be referenced later
+    // other arguments in stack will not be touched
+    emit_push(A1, s);
+    emit_push(A2, s);
+    emit_push(A3, s);
+    emit_push(SELF, s);
+
+    Symbol objClassType = expr->get_type();
+    expr->code(s);
+    emit_move(SELF, ACC, s);
+
+    CgenNodeP clsPtr = g_clsTablePtr->probe(objClassType);
+    if (!clsPtr){
+        assert(!"undefined method!");
+        return;
+    }
+    
+    for (int i = actual->len() - 1; i >= 0; --i){
+        actual->nth(i)->code(s);
+        if (i < 3){
+            //save result from acc to registers a1/a2/a3
+            s << MOVE << "$a" << (i+1) <<  " " << ACC << endl;
+        }else{
+            //save in stack 
+            emit_push(ACC, s);
+        }
+    }
+
+    //call function
+    size_t method_offset = clsPtr->get_method_offset(name);
+    emit_load(T1, 2, SELF, s); // offset 2 = dispTab
+    emit_load(T1, method_offset, T1, s);
+    emit_jalr(T1, s);
+
+    //need to restore self here
+    s<< "\t#restore self/a1/a2/a3..." << endl;
+    emit_load(SELF, 1, SP, s);
+    emit_load(A1, 2, SP, s);
+    emit_load(A2, 3, SP, s);
+    emit_load(A3, 4, SP, s);
+    emit_addiu(SP, SP, 16, s);
 }
 
 void cond_class::code(ostream &s) {
