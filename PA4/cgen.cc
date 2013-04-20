@@ -1049,16 +1049,26 @@ namespace{
         emit_store(SELF, 2, SP, strm);
         emit_store(RA, 1, SP, strm);
         emit_addiu(FP, SP, 4, strm);
+    }
+
+    void emit_init_call_save_active_records(ostream& strm){
+        //we need to make sure $s0 contains $a0
+        emit_call_save_active_records(strm);
         emit_move(SELF, ACC, strm);
     }
 
     void emit_call_save_and_return(ostream& strm){
-        emit_move(ACC, SELF, strm);
         emit_load(FP, 3, SP, strm);
         emit_load(SELF, 2, SP, strm);
         emit_load(RA, 1, SP, strm);
         emit_addiu(SP, SP, 12, strm);
         emit_return(strm);
+    }
+
+    void emit_init_call_save_and_return(ostream& strm){
+        //We need to return $a0 for init and store $s0 in it
+        emit_move(ACC, SELF, strm);
+        emit_call_save_and_return(strm);
     }
 
     void emit_save_temp_registers(ostream& strm){
@@ -1090,7 +1100,7 @@ void CgenClassTable::code_class_initializers(){
         if (!(node->basic()) && (std::find(initList.begin(), initList.end(), node->name) == initList.end())){
             //emit initializer
             str << node->name << "_init" << LABEL;
-            emit_call_save_active_records(str);
+            emit_init_call_save_active_records(str);
             g_current_sp_offset = 1; //sp points to next unused 
             CgenNode* parent = node->get_parentnd();
             if (parent){
@@ -1115,7 +1125,7 @@ void CgenClassTable::code_class_initializers(){
                     }
                 }
             }
-            emit_call_save_and_return(str);
+            emit_init_call_save_and_return(str);
         }
         initList.push_back(node->name);
     }
@@ -1126,11 +1136,11 @@ void CgenClassTable::code_basic_class_initializers(){
     Symbol basics[] = {Object, Int, Bool, IO, Str};
     for (size_t i = 0; i < sizeof(basics)/sizeof(basics[0]); ++i){
         str << basics[i] << "_init" << LABEL;
-        emit_call_save_active_records(str);
+        emit_init_call_save_active_records(str);
         if (basics[i] != Object){
             emit_jal("Object_init", str);
         }
-        emit_call_save_and_return(str);
+        emit_init_call_save_and_return(str);
     }
 }
 
@@ -1174,8 +1184,6 @@ void CgenClassTable::code_class_method_definitions(){
                     }
                 }
                 method->expr->code(str);
-                //return object save in v0 now
-                emit_move(V1, ACC, str);
                 emit_call_save_and_return(str);
             }
 
@@ -1373,41 +1381,68 @@ void assign_class::code(ostream &s) {
     s << "\t# Assign end..." << endl;
 }
 
-void static_dispatch_class::code(ostream &s) {
-    //TODO:
-}
+void static_dispatch_class::code(ostream &s) {    
+    int numOfArgRegs = actual->len();
+    numOfArgRegs = numOfArgRegs > 3 ? 3 : numOfArgRegs;
 
-void dispatch_class::code(ostream &s) {
-    //TODO: refine this!
     //parent arguments' registers needs to be saved to be referenced later
-    // other arguments in stack will not be touched
     s << "\t#@ dispatch prepare, save registers..." << endl;
-    emit_push(A1, s);
-    emit_push(A2, s);
-    emit_push(A3, s);
-    emit_push(SELF, s);
+    emit_addiu(SP, SP, -4 - 4 * numOfArgRegs, s);
+    for (int i = 0; i < numOfArgRegs; ++i){
+        s << SW << "$a" << (i + 1) << " " << 4*(numOfArgRegs + 1 - i) << "($sp)" << endl;
+    }
+    emit_store(SELF, 1, SP, s);
 
-    s << "\t#@ dispatch - evaluate and set new $s0 ..." << endl;
-    Symbol objClassType = expr->get_type();
-    expr->code(s);
-    emit_move(SELF, ACC, s);
-
-    CgenNodeP clsPtr = g_clsTablePtr->lookup(objClassType);
-    if (!clsPtr){
+    s << "\t#@ evaluate actual parameters and save into registers/stack" << endl;
+    Symbol objClassType = type_name;
+    CgenNodeP classPtr = g_clsTablePtr->lookup(objClassType);
+    if (!classPtr){
         assert(!"undefined method!");
         return;
     }
+
+    Formals formals = NULL;
+    CgenNodeP clsPtr = classPtr;
+    while(formals == NULL){
+        for (int i = clsPtr->features->first(); clsPtr->features->more(i); i = clsPtr->features->next(i)){
+            method_class* method = dynamic_cast<method_class*>(clsPtr->features->nth(i));
+            if (method && (method->name == name)){
+                //found
+                formals = method->formals;
+            }
+        }
+        if (formals == NULL){
+            //find in parent
+            clsPtr = clsPtr->get_parentnd();
+        }
+    }
     
+    //formal parameter generation and save into stack/registers
     for (int i = actual->len() - 1; i >= 0; --i){
         actual->nth(i)->code(s);
+        //The arg name might be referenced within the function, so
+        // read the formal name first
+        formal_class* formal = dynamic_cast<formal_class*>(formals->nth(i));
+        assert(formal);
+        //save addr info 
+        RegAddrInfo& info = g_varTable[formal->name];
+
         if (i < 3){
             //save result from acc to registers a1/a2/a3
             s << MOVE << "$a" << (i+1) <<  " " << ACC << endl;
+            info.location = LOC_ARG;
+            info.offset = (i+1);
         }else{
-            //save in stack 
+            //save in stack, but won't be popped out until done 
             emit_push(ACC, s);
+            info.location = LOC_FP;
+            info.offset = g_current_sp_offset++;
         }
     }
+
+    s << "\t#@ dispatch - evaluate and set new $s0 ..." << endl;
+    expr->code(s);
+    emit_move(SELF, ACC, s);
 
     s << "\t#@ dispatch do the call ..." << endl;
     //call function
@@ -1419,10 +1454,113 @@ void dispatch_class::code(ostream &s) {
     //need to restore self here
     s<< "\t#@ dispatch restore self/a1/a2/a3..." << endl;
     emit_load(SELF, 1, SP, s);
-    emit_load(A1, 2, SP, s);
-    emit_load(A2, 3, SP, s);
-    emit_load(A3, 4, SP, s);
-    emit_addiu(SP, SP, 16, s);
+
+    for (int i = 0; i < numOfArgRegs; ++i){
+        s << LW << "$a" << (i+1) << " " << (numOfArgRegs + 1 - i)*4 << "($s0)" << endl;
+    }
+    emit_addiu(SP, SP, (numOfArgRegs + 1) * 4, s);
+
+    //restore allocated names for arguments
+    // pop used stack space and remove from varTable
+    // The name itself will be popped
+    if (formals->len() > 3){
+        s << "\t#@ used stack space rewinding..." << endl;
+        emit_addiu(SP, SP, (formals->len() - 3) * 4, s);
+    }
+    for (int i = formals->len() - 1; i >= 0; --i){
+        g_varTable.erase((dynamic_cast<formal_class*>(formals->nth(i)))->name);
+    }
+}
+
+void dispatch_class::code(ostream &s) {    
+    int numOfArgRegs = actual->len();
+    numOfArgRegs = numOfArgRegs > 3 ? 3 : numOfArgRegs;
+
+    //parent arguments' registers needs to be saved to be referenced later
+    s << "\t#@ dispatch prepare, save registers..." << endl;
+    emit_addiu(SP, SP, -4 - 4 * numOfArgRegs, s);
+    for (int i = 0; i < numOfArgRegs; ++i){
+        s << SW << "$a" << (i + 1) << " " << 4*(numOfArgRegs + 1 - i) << "($sp)" << endl;
+    }
+    emit_store(SELF, 1, SP, s);
+
+    s << "\t#@ evaluate actual parameters and save into registers/stack" << endl;
+    Symbol objClassType = expr->get_type();
+    CgenNodeP classPtr = g_clsTablePtr->lookup(objClassType);
+    if (!classPtr){
+        assert(!"undefined method!");
+        return;
+    }
+
+    Formals formals = NULL;
+    CgenNodeP clsPtr = classPtr;
+    while(formals == NULL){
+        for (int i = clsPtr->features->first(); clsPtr->features->more(i); i = clsPtr->features->next(i)){
+            method_class* method = dynamic_cast<method_class*>(clsPtr->features->nth(i));
+            if (method && (method->name == name)){
+                //found
+                formals = method->formals;
+            }
+        }
+        if (formals == NULL){
+            //find in parent
+            clsPtr = clsPtr->get_parentnd();
+        }
+    }
+    
+    //formal parameter generation and save into stack/registers
+    for (int i = actual->len() - 1; i >= 0; --i){
+        actual->nth(i)->code(s);
+        //The arg name might be referenced within the function, so
+        // read the formal name first
+        formal_class* formal = dynamic_cast<formal_class*>(formals->nth(i));
+        assert(formal);
+        //save addr info 
+        RegAddrInfo& info = g_varTable[formal->name];
+
+        if (i < 3){
+            //save result from acc to registers a1/a2/a3
+            s << MOVE << "$a" << (i+1) <<  " " << ACC << endl;
+            info.location = LOC_ARG;
+            info.offset = (i+1);
+        }else{
+            //save in stack, but won't be popped out until done 
+            emit_push(ACC, s);
+            info.location = LOC_FP;
+            info.offset = g_current_sp_offset++;
+        }
+    }
+
+    s << "\t#@ dispatch - evaluate and set new $s0 ..." << endl;
+    expr->code(s);
+    emit_move(SELF, ACC, s);
+
+    s << "\t#@ dispatch do the call ..." << endl;
+    //call function
+    size_t method_offset = clsPtr->get_method_offset(name);
+    emit_load(T1, 2, SELF, s); // offset 2 = dispTab
+    emit_load(T1, method_offset, T1, s);
+    emit_jalr(T1, s);
+
+    //need to restore self here
+    s<< "\t#@ dispatch restore self/a1/a2/a3..." << endl;
+    emit_load(SELF, 1, SP, s);
+
+    for (int i = 0; i < numOfArgRegs; ++i){
+        s << LW << "$a" << (i+1) << " " << (numOfArgRegs + 1 - i)*4 << "($s0)" << endl;
+    }
+    emit_addiu(SP, SP, (numOfArgRegs + 1) * 4, s);
+
+    //restore allocated names for arguments
+    // pop used stack space and remove from varTable
+    // The name itself will be popped
+    if (formals->len() > 3){
+        s << "\t#@ used stack space rewinding..." << endl;
+        emit_addiu(SP, SP, (formals->len() - 3) * 4, s);
+    }
+    for (int i = formals->len() - 1; i >= 0; --i){
+        g_varTable.erase((dynamic_cast<formal_class*>(formals->nth(i)))->name);
+    }
 }
 
 void cond_class::code(ostream &s) {
@@ -1513,9 +1651,9 @@ void block_class::code(ostream &s) {
 }
 
 void let_class::code(ostream &s) {
-
-    //TODO
-
+    init->code(s);
+    new_location_for_symbol(identifier, ACC, s);
+    body->code(s);
 }
 
 
@@ -1528,8 +1666,8 @@ void let_class::code(ostream &s) {
     e2->code(s);\
     emit_move(T2, ACC, s);\
     s << "\t#>> restore e1 to $t1 and do $t1 + $t2" << endl;\
-    emit_pop(T1, s);\
-    emit_load(T1, first_attr_offset, T1, s); \
+    emit_pop(ACC, s);\
+    emit_load(T1, first_attr_offset, ACC, s); \
     emit_load(T2, first_attr_offset, T2, s);\
     com(T1, T1, T2, s);\
     s << "\t#>> store value to $a0 for return" << endl;\
@@ -1677,11 +1815,13 @@ void bool_const_class::code(ostream& s)
 
 
 void new__class::code(ostream &s) {
-    //TODO: refine this!
+    s << "\t#@@ new object begin " << endl;
+    CgenNode* clsPtr = g_clsTablePtr->lookup(type_name);
     emit_partial_load_address(ACC, s);
-    s << type_name << PROTOBJ_SUFFIX << endl;
+    s << clsPtr->name << PROTOBJ_SUFFIX << endl;
     emit_jal("Object.copy", s);
     s << JAL << type_name << CLASSINIT_SUFFIX << endl;
+    s << "\t#@@ new object end " << endl;
 }
 
 void isvoid_class::code(ostream &s) {
