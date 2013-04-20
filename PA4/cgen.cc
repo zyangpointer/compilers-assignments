@@ -119,7 +119,7 @@ static char *gc_collect_names[] =
 namespace{
     typedef enum{LOC_FP, LOC_ARG, LOC_TEMP} REG_LOC;
     typedef struct{
-        unsigned short location;  // 0 - fp (fp + offset), 1 - a0,...a4, 2 - t0, t1, ..t9
+        unsigned short location;  // 0 - fp (fp + offset), 1 - a1, a2, a3, 2 - t0, t1, ..t9
         unsigned short offset; 
     }RegAddrInfo;
     typedef std::map<Symbol, RegAddrInfo> VarAddrTable;
@@ -129,6 +129,9 @@ namespace{
     size_t g_current_sp_offset = 0; //sp - fp
 
     CgenClassTable* g_clsTablePtr;
+
+    size_t first_attr_offset = 3;
+    size_t next_lable_id = 0;
 }
 
 //  BoolConst is a class that implements code generation for operations
@@ -347,6 +350,11 @@ static void emit_push(char *reg, ostream& str)
 {
   emit_store(reg,0,SP,str);
   emit_addiu(SP,SP,-4,str);
+}
+
+static void emit_pop(char* reg, ostream& str){
+    emit_load(reg, 0, SP, str);
+    emit_addiu(SP, SP, 4, str);
 }
 
 //
@@ -648,7 +656,9 @@ CgenClassTable::CgenClassTable(Classes classes, ostream& s) :
     nds(NULL), str(s), objectclasstag(0), ioclasstag(1), intclasstag(2),
     boolclasstag(3), stringclasstag(4)
 {
+    g_clsTablePtr = this;
     enterscope();
+
     if (cgen_debug) cout << "Building CgenClassTable" << endl;
     install_basic_classes();
     install_classes(classes);
@@ -1002,7 +1012,7 @@ void CgenClassTable::code_basic_protObj_attrs(Symbol name){
 
 
 namespace{
-    void emit_init_save_active_records(ostream& strm){
+    void emit_call_save_active_records(ostream& strm){
         emit_addiu(SP, SP, -12, strm);
         emit_store(FP, 3, SP, strm);
         emit_store(SELF, 2, SP, strm);
@@ -1011,13 +1021,27 @@ namespace{
         emit_move(SELF, ACC, strm);
     }
 
-    void emit_init_save_and_return(ostream& strm){
+    void emit_call_save_and_return(ostream& strm){
         emit_move(ACC, SELF, strm);
         emit_load(FP, 3, SP, strm);
         emit_load(SELF, 2, SP, strm);
         emit_load(RA, 1, SP, strm);
         emit_addiu(SP, SP, 12, strm);
         emit_return(strm);
+    }
+
+    void emit_save_temp_registers(ostream& strm){
+        strm << "\t#<< Saving temp registers t1&t2" << endl;
+        emit_addiu(SP, SP, -8, strm);
+        emit_store(T1, 2, SP, strm);
+        emit_store(T2, 1, SP, strm);
+    }
+
+    void emit_restore_temp_registers(ostream& strm){
+        strm << "\t#>> Restoring temp registers t1&t2" << endl;
+        emit_load(T1, 1, SP, strm);
+        emit_load(T2, 2, SP, strm);
+        emit_addiu(SP, SP, 8, strm);
     }
 }
 
@@ -1035,7 +1059,7 @@ void CgenClassTable::code_class_initializers(){
         if (!(node->basic()) && (std::find(initList.begin(), initList.end(), node->name) == initList.end())){
             //emit initializer
             str << node->name << "_init" << LABEL;
-            emit_init_save_active_records(str);
+            emit_call_save_active_records(str);
             g_current_sp_offset = 1; //sp points to next unused 
             CgenNode* parent = node->get_parentnd();
             if (parent){
@@ -1060,7 +1084,7 @@ void CgenClassTable::code_class_initializers(){
                     }
                 }
             }
-            emit_init_save_and_return(str);
+            emit_call_save_and_return(str);
         }
         initList.push_back(node->name);
     }
@@ -1071,25 +1095,35 @@ void CgenClassTable::code_basic_class_initializers(){
     Symbol basics[] = {Object, Int, Bool, IO, Str};
     for (size_t i = 0; i < sizeof(basics)/sizeof(basics[0]); ++i){
         str << basics[i] << "_init" << LABEL;
-        emit_init_save_active_records(str);
+        emit_call_save_active_records(str);
         if (basics[i] != Object){
             emit_jal("Object_init", str);
         }
-        emit_init_save_and_return(str);
+        emit_call_save_and_return(str);
     }
 }
 
 void CgenClassTable::code_class_method_definitions(){
     for(List<CgenNode> *l = nds; l; l = l->tl()){
+
         CgenNode* clsPtr = l->hd();
+        if (clsPtr->basic()){
+            continue; //builtin methods are ready in runtime
+        }
         Features fs = clsPtr->features;
+        enterscope();
+        addid(SELF_TYPE, clsPtr);
+
         for (int i = fs->first(); fs->more(i); i = fs->next(i)){
+            enterscope();
             method_class* method = dynamic_cast<method_class*>(fs->nth(i));
+
             if (method){
                 str << clsPtr->name << "." << method->name << LABEL;
 
+                next_lable_id = 1;
                 size_t numOfArgs = method->formals->len();
-                emit_init_save_active_records(str);
+                emit_call_save_active_records(str);
 
                 //save formal parameters' address for later reference
                 for (size_t i = 0; i < numOfArgs; ++i){
@@ -1099,7 +1133,7 @@ void CgenClassTable::code_class_method_definitions(){
                     if (i < 3){
                         //first 3 arguments saved in a1,a2,a3, self in a0
                         addrInfo.location = LOC_ARG;
-                        addrInfo.offset = i; 
+                        addrInfo.offset = i + 1; 
                     }else{
                         //Those arguments saved in stack below our fp and registers
                         // below fp, 0:ra, -1:s0, -2:oldfp -3:3, -4:4
@@ -1111,9 +1145,13 @@ void CgenClassTable::code_class_method_definitions(){
                 method->expr->code(str);
                 //return object save in v0 now
                 emit_move(V1, ACC, str);
-                emit_init_save_and_return(str);
+                emit_call_save_and_return(str);
             }
+
+            exitscope(); //method scope
         }
+
+        exitscope(); //exit class scope
     }
 }
 
@@ -1190,7 +1228,9 @@ namespace{
 namespace{
     size_t find_name(Symbol name, AttributeMap& tbl){
         if (tbl.find(name) == tbl.end()){
-            assert(!"Should never reach here!");
+            if (cgen_debug){
+                cout << "@@@ symbol name " << name << " not in attr/method table" << endl;
+            }
             return 0;
         }
         return tbl[name];
@@ -1198,14 +1238,14 @@ namespace{
 }
 size_t CgenNode::get_attr_offset(Symbol name){
        if (!m_attrMapBuilt){
-           get_feature_list(false); //check attributes to identify offset
+           get_feature_list(false); 
        }
        return find_name(name, m_attrMap);
 }
 
 size_t CgenNode::get_method_offset(Symbol name){
        if (!m_methodMapBuilt){
-           get_feature_list(false); //check attributes to identify offset
+           get_feature_list(); 
        }
        return find_name(name, m_methodMap);
 }
@@ -1242,7 +1282,7 @@ FeatureNameList CgenNode::get_feature_list(bool check_on_method){
         cout << "Class " << name << ": number of " << (check_on_method ? "methods:" : "attrs:") << (features_list.size()) << endl;
     }
     //build attribute map for offset calculation
-    if (!m_attrMapBuilt && !check_on_method){
+    if ((!m_attrMapBuilt) && (!check_on_method)){
         size_t offset = 3; //classid + size + dispTable
         for (FeatureNameList::iterator it = features_list.begin(), itEnd = features_list.end();
                 it != itEnd; ++it){
@@ -1250,7 +1290,7 @@ FeatureNameList CgenNode::get_feature_list(bool check_on_method){
         }
         m_attrMapBuilt = true;
     }
-    if (!m_methodMapBuilt && check_on_method){
+    if ((!m_methodMapBuilt) && (check_on_method)){
         size_t offset = 0;
         for (FeatureNameList::iterator it = features_list.begin(), itEnd = features_list.end();
                 it != itEnd; ++it){
@@ -1271,6 +1311,7 @@ FeatureNameList CgenNode::get_feature_list(bool check_on_method){
 //
 //*****************************************************************
 
+
 void assign_class::code(ostream &s) {
 }
 
@@ -1280,16 +1321,18 @@ void static_dispatch_class::code(ostream &s) {
 void dispatch_class::code(ostream &s) {
     //parent arguments' registers needs to be saved to be referenced later
     // other arguments in stack will not be touched
+    s << "\t#@ dispatch prepare, save registers..." << endl;
     emit_push(A1, s);
     emit_push(A2, s);
     emit_push(A3, s);
     emit_push(SELF, s);
 
+    s << "\t#@ dispatch - evaluate and set new $s0 ..." << endl;
     Symbol objClassType = expr->get_type();
     expr->code(s);
     emit_move(SELF, ACC, s);
 
-    CgenNodeP clsPtr = g_clsTablePtr->probe(objClassType);
+    CgenNodeP clsPtr = g_clsTablePtr->lookup(objClassType);
     if (!clsPtr){
         assert(!"undefined method!");
         return;
@@ -1306,6 +1349,7 @@ void dispatch_class::code(ostream &s) {
         }
     }
 
+    s << "\t#@ dispatch do the call ..." << endl;
     //call function
     size_t method_offset = clsPtr->get_method_offset(name);
     emit_load(T1, 2, SELF, s); // offset 2 = dispTab
@@ -1313,7 +1357,7 @@ void dispatch_class::code(ostream &s) {
     emit_jalr(T1, s);
 
     //need to restore self here
-    s<< "\t#restore self/a1/a2/a3..." << endl;
+    s<< "\t#@ dispatch restore self/a1/a2/a3..." << endl;
     emit_load(SELF, 1, SP, s);
     emit_load(A1, 2, SP, s);
     emit_load(A2, 3, SP, s);
@@ -1336,31 +1380,145 @@ void block_class::code(ostream &s) {
 void let_class::code(ostream &s) {
 }
 
+
+#define __GEN_ARITH_CODE__(name, com) \
+    s << "\t#" << name << " begin: evaluate t1 -> $a0 and push to stack" << endl;\
+    e1->code(s);\
+    emit_jal("Object.copy", s);\
+    emit_push(ACC, s);\
+    emit_save_temp_registers(s);\
+    s << "\t#>> evaluate e2 to $t2" << endl;\
+    e2->code(s);\
+    emit_move(T2, ACC, s);\
+    s << "\t#>> restore e1 to $t1 and do $t1 + $t2" << endl;\
+    emit_pop(T1, s);\
+    emit_load(T1, first_attr_offset, T1, s); \
+    emit_load(T2, first_attr_offset, T2, s);\
+    com(T1, T1, T2, s);\
+    s << "\t#>> store value to $a0 for return" << endl;\
+    emit_store(T1, first_attr_offset, ACC, s);\
+    emit_restore_temp_registers(s);\
+    s << "\t#" << name << " end!" << endl;
+    
 void plus_class::code(ostream &s) {
+    __GEN_ARITH_CODE__("Plus", emit_add);
 }
 
 void sub_class::code(ostream &s) {
+    __GEN_ARITH_CODE__("Sub", emit_sub);
 }
 
 void mul_class::code(ostream &s) {
+    __GEN_ARITH_CODE__("Mul", emit_mul);
 }
 
 void divide_class::code(ostream &s) {
+    __GEN_ARITH_CODE__("Div", emit_div);
 }
 
 void neg_class::code(ostream &s) {
+    s << "\t@@@ << Neg begin..." << endl;
+    e1->code(s);
+    emit_jal("Object.copy", s);
+    emit_load(T1, first_attr_offset, ACC, s);
+    emit_load_imm(V0, -1, s);
+    emit_mul(T1, T1, V0, s);
+    emit_store(T1, first_attr_offset, ACC, s);
+    s << "\t@@@ << Neg end..." << endl;
 }
+
+
+#define __GEN_COMP_CODE(name, comp)   \
+    s << "#" << name << " Begin..." << endl;\
+    e1->code(s);\
+    s << "# << save t1&t2..." << endl;\
+    emit_addiu(SP, SP, -8, s);\
+    emit_store(T1, 2, SP, s);\
+    emit_store(T2, 1, SP, s);\
+    emit_load(T1, first_attr_offset, ACC, s);\
+    e2->code(s);\
+    emit_load(T2, first_attr_offset, ACC, s);\
+    int true_branch = next_lable_id++;\
+    int false_branch = next_lable_id++;\
+    int joint_branch = next_lable_id++;\
+    comp(T1, ACC, true_branch, s);\
+    emit_label_def(true_branch, s);\
+    emit_load_bool(ACC, truebool, s);\
+    emit_branch(joint_branch, s);\
+    emit_label_def(false_branch, s);\
+    emit_load_bool(ACC, falsebool, s);\
+    emit_branch(joint_branch, s);\
+    emit_label_def(joint_branch, s);\
+    emit_load(T1, 1, SP, s);\
+    emit_load(T2, 2, SP, s);\
+    emit_addiu(SP, SP, 8, s);\
+    s << "#" << name << " end..." << endl;
 
 void lt_class::code(ostream &s) {
+    __GEN_COMP_CODE("LT", emit_blt);
 }
 
+
 void eq_class::code(ostream &s) {
+    s << "#@@@ Equal check begin..." << endl;
+    e1->code(s);
+    emit_save_temp_registers(s);
+    emit_move(T1, ACC, s);
+    e2->code(s);
+    emit_move(T2, ACC, s);
+
+    //now e1 in T1, e2 in a0
+    int true_label = next_lable_id++;
+    int false_label = next_lable_id++;
+    emit_beq(T1, T2, true_label, s);
+    emit_beq(T1, ZERO, false_label, s);
+    emit_beq(T2, ZERO, false_label, s);
+    if (e1->get_type() == Int || e1->get_type() == Bool){
+        s << "\t#<< compare Int/Bool contents..." << endl;
+        emit_load(T1, first_attr_offset, T1, s);
+        emit_load(T2, first_attr_offset, T2, s);
+        emit_beq(T1, T2, true_label, s);
+        emit_branch(false_label, s);
+    }else if(e1->get_type() == Str){
+        s << "\t#<< compare String contents..." << endl;
+        emit_load(V0, first_attr_offset, T1, s);
+        emit_load(V1, first_attr_offset, T2, s);
+        emit_beq(V0, V1, true_label, s);
+        emit_load(T1, first_attr_offset + 1, T1, s);
+        emit_load(T2, first_attr_offset + 1, T2, s);
+        emit_beq(T1, T2, true_label, s);
+        emit_branch(false_label, s);
+    }
+
+    int joint_label = next_lable_id++;
+    emit_label_def(true_label, s);
+    emit_load_bool(ACC, truebool, s);
+    emit_branch(joint_label, s);
+
+    emit_label_def(false_label, s);
+    emit_load_bool(ACC, falsebool, s);
+    emit_branch(joint_label, s);
+
+    emit_label_def(joint_label, s);
+    emit_restore_temp_registers(s);
+    s << "#@@@ Equal check end..." << endl;
 }
 
 void leq_class::code(ostream &s) {
+    __GEN_COMP_CODE("LEQ", emit_bleq);
 }
 
 void comp_class::code(ostream &s) {
+    s << "\t#@@@ Not begin..." << endl;
+    e1->code(s);
+    emit_save_temp_registers(s);
+    emit_load(T1, first_attr_offset, ACC, s);
+    emit_load_imm(T2, 1, s);
+    emit_sub(T1, T2, T1, s); //1->0, 0->1
+    emit_store(T1, first_attr_offset, ACC, s);
+
+    emit_restore_temp_registers(s);
+    s << "\t#@@@ Not end..." << endl;
 }
 
 void int_const_class::code(ostream& s)  
@@ -1397,6 +1555,26 @@ void no_expr_class::code(ostream &s) {
 }
 
 void object_class::code(ostream &s) {
+    s << "\t#@@@ object codegen..." << endl;
+    CgenNodeP cls = g_clsTablePtr->lookup(SELF_TYPE);
+    if (!cls){
+        assert(!"Bad scope for object class!");
+    }
+    size_t offset = cls->get_attr_offset(name);
+    if (offset == 0){
+        //TODO: abstract this method!
+        if (g_varTable.find(name) != g_varTable.end()){
+            RegAddrInfo& info = g_varTable[name];
+            if (info.location == LOC_FP){
+                s << LW << ACC << " " << info.offset * WORD_SIZE << "(" << FP << ")" << endl;
+            }else if (info.location == LOC_ARG){
+                s << MOVE << ACC << " " << "$a" << info.offset << endl;
+            }else if (info.location == LOC_TEMP){
+                s << MOVE << ACC << " " << "$t" << info.offset << endl;
+            }
+        }
+    }else{
+        emit_load(ACC, offset, SELF, s);
+    }
 }
-
 

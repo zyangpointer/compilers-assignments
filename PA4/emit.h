@@ -77,8 +77,8 @@
 #define SP   "$sp"		// Stack pointer 
 #define FP   "$fp"		// Frame pointer 
 #define RA   "$ra"		// Return address 
-#define V1   "$v1"      //return value
-#define V2   "$v2"      //return value
+#define V0   "$v0"      // scratch
+#define V1   "$v1"      // scratch
 
 //
 // Opcodes
