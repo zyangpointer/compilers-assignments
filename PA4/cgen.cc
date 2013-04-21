@@ -643,6 +643,7 @@ void CgenClassTable::code_constants()
   //
   // Add constants that are required by the code generator.
   //
+  //stringtable.add_string(__FILE__);
   stringtable.add_string("");
   inttable.add_string("0");
 
@@ -975,7 +976,7 @@ namespace{
             if (g_varTable.find(name) != g_varTable.end()){
                 RegAddrInfo& info = g_varTable[name];
                 if (info.location == LOC_FP){
-                    s << LW << ACC << " " << info.offset * WORD_SIZE << "(" << FP << ")" << endl;
+                    s << LW << ACC << " " << -1 * info.offset * WORD_SIZE << "(" << FP << ")" << endl;
                 }else if (info.location == LOC_ARG){
                     s << MOVE << ACC << " " << "$a" << info.offset << endl;
                 }else if (info.location == LOC_TEMP){
@@ -995,6 +996,14 @@ namespace{
 
         emit_store(reg, 0, SP, s);
         emit_addiu(SP, SP, -4, s);
+    }
+
+    void free_symbol_location(Symbol name, ostream& s){
+        if (g_varTable.find(name) != g_varTable.end()){
+            RegAddrInfo& addr = g_varTable[name];
+            g_current_sp_offset--;
+            emit_addiu(SP, SP, 4, s);
+        }
     }
 }
 
@@ -1118,7 +1127,7 @@ void CgenClassTable::code_class_initializers(){
             //emit initializer
             str << node->name << "_init" << LABEL;
             emit_init_call_save_active_records(str);
-            g_current_sp_offset = 1; //sp points to next unused 
+            g_current_sp_offset = 1; //Initially, loc = fp + -1 * 4
             CgenNode* parent = node->get_parentnd();
             if (parent){
                 if (cgen_debug)
@@ -1428,9 +1437,10 @@ void static_dispatch_class::code(ostream &s) {
     Symbol objClassType = type_name;
     CgenNodeP classPtr = g_clsTablePtr->lookup(objClassType);
     if (!classPtr){
-        assert(!"undefined method!");
+        assert(!"undefined class found!");
         return;
     }
+    if (cgen_debug) cout << "Dispatch object class is:" << classPtr->name << endl;
 
     Formals formals = NULL;
     CgenNodeP clsPtr = classPtr;
@@ -1478,6 +1488,15 @@ void static_dispatch_class::code(ostream &s) {
     s << "\t#@ dispatch do the call ..." << endl;
     //call function
     size_t method_offset = clsPtr->get_method_offset(name);
+    if (cgen_debug) cout << "get method offset for:" << name << " from class:" << clsPtr->name << ",offset=" << method_offset << endl;
+
+    int dispatch_call = next_lable_id++;
+    emit_bne(SELF, ZERO, dispatch_call, s);
+    emit_load_string(ACC,stringtable.lookup_string("0"), s);
+    emit_load_imm(T1, 1, s);
+    emit_jal("_dispatch_abort", s);
+
+    emit_label_def(dispatch_call, s);
     emit_load(T1, 2, SELF, s); // offset 2 = dispTab
     emit_load(T1, method_offset, T1, s);
     emit_jalr(T1, s);
@@ -1502,6 +1521,7 @@ void static_dispatch_class::code(ostream &s) {
         g_varTable.erase((dynamic_cast<formal_class*>(formals->nth(i)))->name);
     }
 }
+
 
 void dispatch_class::code(ostream &s) {    
     int numOfArgRegs = actual->len();
@@ -1571,6 +1591,14 @@ void dispatch_class::code(ostream &s) {
     //call function
     size_t method_offset = clsPtr->get_method_offset(name);
     if (cgen_debug) cout << "get method offset for:" << name << " from class:" << clsPtr->name << ",offset=" << method_offset << endl;
+
+    int dispatch_call = next_lable_id++;
+    emit_bne(SELF, ZERO, dispatch_call, s);
+    emit_load_string(ACC,stringtable.lookup_string(""), s);
+    emit_load_imm(T1, 1, s);
+    emit_jal("_dispatch_abort", s);
+
+    emit_label_def(dispatch_call, s);
     emit_load(T1, 2, SELF, s); // offset 2 = dispTab
     emit_load(T1, method_offset, T1, s);
     emit_jalr(T1, s);
@@ -1670,8 +1698,9 @@ void typcase_class::code(ostream &s) {
     }
     
     //allocate new location with value from T1
-    branch->expr->code(s);
     new_location_for_symbol(branch->name, T1, s);
+    branch->expr->code(s);
+    free_symbol_location(branch->name, s);
 
     s << "\t#$$ typecase end..." << endl;
 }
@@ -1684,9 +1713,26 @@ void block_class::code(ostream &s) {
 }
 
 void let_class::code(ostream &s) {
+    g_clsTablePtr->enterscope();
+
+    s << "\t# let statement begin..." << endl;
+    s << "\t#<<< let init ..." << endl;
     init->code(s);
+    if (init->get_type() == NULL){
+        if (cgen_debug)
+            cout << "<<< let statement, init type:" << (init->get_type() ? init->get_type() : No_type) << endl;
+        //Load zero here!
+        emit_move(ACC, ZERO, s);
+    }
     new_location_for_symbol(identifier, ACC, s);
+    s << "\t#<<< let body ..." << endl;
     body->code(s);
+
+    s << "\t#<<< pop out the symbol ..." << endl;
+    free_symbol_location(identifier, s);
+
+    s << "\t# let statement end..." << endl;
+    g_clsTablePtr->exitscope();
 }
 
 
