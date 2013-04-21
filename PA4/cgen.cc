@@ -1126,6 +1126,8 @@ void CgenClassTable::code_class_initializers(){
         if (!(node->basic()) && (std::find(initList.begin(), initList.end(), node->name) == initList.end())){
             //emit initializer
             str << node->name << "_init" << LABEL;
+
+            str << "\t# Restore stack and registers..." << endl;
             emit_init_call_save_active_records(str);
             g_current_sp_offset = 1; //Initially, loc = fp + -1 * 4
             CgenNode* parent = node->get_parentnd();
@@ -1143,14 +1145,19 @@ void CgenClassTable::code_class_initializers(){
                 if (!attrPtr){
                     continue;
                 }else{
+                    size_t offset = node->get_attr_offset(attrPtr->name);
                     // using get_attr_offset to decide absolute offset
                     if (typeid(*attrPtr->init) != typeid(no_expr_class)){
                         attrPtr->init->code(str);
-                        size_t offset = node->get_attr_offset(attrPtr->name);
                         emit_store(ACC, offset, SELF, str);
+                    }else{
+                        str << "\t# Set zero for " << node->name << ":" << attrPtr->name << endl;
+                        emit_store(ZERO, offset, SELF, str);
                     }
                 }
             }
+
+            str << "\t# Restore stack and registers..." << endl;
             emit_init_call_save_and_return(str);
         }
         initList.push_back(node->name);
@@ -1683,7 +1690,13 @@ void typcase_class::code(ostream &s) {
 
     expr->code(s);
     emit_move(T1, ACC, s);
+    emit_bne(T1, ZERO, next_lable_id, s);
 
+    emit_load_string(ACC,stringtable.lookup_string("test.cl"), s);
+    emit_load_imm(T1, 1, s);
+    emit_jal("_case_abort2", s);
+
+    emit_label_def(next_lable_id++, s);
     //select the cloest branch
     int case_branch = -1;
     branch_class* branch = NULL;
