@@ -967,11 +967,12 @@ namespace{
     }
     
     void load_variable_to_a0(Symbol name, ostream& s){
-        CgenNodeP cls = g_clsTablePtr->lookup(SELF_TYPE);
+        CgenNodeP cls = g_clsTablePtr->lookup(self);
         if (!cls){
             assert(!"Bad scope for object class!");
         }
         size_t offset = cls->get_attr_offset(name);
+        s << "\t# <<< name: " << name << ", offset = " << offset << endl;
         if (offset == 0){
             if (g_varTable.find(name) != g_varTable.end()){
                 RegAddrInfo& info = g_varTable[name];
@@ -982,6 +983,8 @@ namespace{
                 }else if (info.location == LOC_TEMP){
                     s << MOVE << ACC << " " << "$t" << info.offset << endl;
                 }
+            }else{
+                assert("name not found in class or varTable!");
             }
         }else{
             emit_load(ACC, offset, SELF, s);
@@ -1123,11 +1126,15 @@ void CgenClassTable::code_class_initializers(){
 
     for(List<CgenNode> *l = nds; l; l = l->tl()){
         CgenNode* node = l->hd();
+
+        enterscope();
+        addid(self, node);
+
         if (!(node->basic()) && (std::find(initList.begin(), initList.end(), node->name) == initList.end())){
             //emit initializer
             str << node->name << "_init" << LABEL;
 
-            str << "\t# Restore stack and registers..." << endl;
+            str << "\t# Save stack and registers..." << endl;
             emit_init_call_save_active_records(str);
             g_current_sp_offset = 1; //Initially, loc = fp + -1 * 4
             CgenNode* parent = node->get_parentnd();
@@ -1148,11 +1155,26 @@ void CgenClassTable::code_class_initializers(){
                     size_t offset = node->get_attr_offset(attrPtr->name);
                     // using get_attr_offset to decide absolute offset
                     if (typeid(*attrPtr->init) != typeid(no_expr_class)){
+                        str << "\t# <<< initialize attribute..." << endl;
                         attrPtr->init->code(str);
                         emit_store(ACC, offset, SELF, str);
+                        str << "\t# <<< initialize attribute done..." << endl;
                     }else{
-                        str << "\t# Set zero for " << node->name << ":" << attrPtr->name << endl;
-                        emit_store(ZERO, offset, SELF, str);
+                        if ((attrPtr->type_decl == Str) || (attrPtr->type_decl == Bool) || (attrPtr->type_decl == Int)){
+                            //default initialization for str/Bool/Int - using the boxed object and save a pointer
+                            // save s0 first
+                            emit_push(SELF, str);
+                            emit_partial_load_address(ACC, str);
+                            str << attrPtr->type_decl << PROTOBJ_SUFFIX << endl;
+                            emit_jal("Object.copy", str);
+                            str << JAL << attrPtr->type_decl << CLASSINIT_SUFFIX << endl;
+                            //retore s0
+                            emit_pop(SELF, str);
+                            emit_store(ACC, offset, SELF, str);
+                        }else{
+                            str << "\t# Set zero for " << node->name << ":" << attrPtr->name << endl;
+                            emit_store(ZERO, offset, SELF, str);
+                        }
                     }
                 }
             }
@@ -1160,6 +1182,9 @@ void CgenClassTable::code_class_initializers(){
             str << "\t# Restore stack and registers..." << endl;
             emit_init_call_save_and_return(str);
         }
+
+        exitscope();
+
         initList.push_back(node->name);
     }
 }
@@ -1178,7 +1203,6 @@ void CgenClassTable::code_basic_class_initializers(){
 }
 
 void CgenClassTable::code_class_method_definitions(){
-    str << "\t# Prepare and save registers ..." << endl;
     for(List<CgenNode> *l = nds; l; l = l->tl()){
 
         CgenNode* clsPtr = l->hd();
@@ -1187,7 +1211,9 @@ void CgenClassTable::code_class_method_definitions(){
         }
         Features fs = clsPtr->features;
         enterscope();
-        addid(SELF_TYPE, clsPtr);
+
+        addid(self, clsPtr);
+        if (cgen_debug) cout << "<<< Saving self type as: " << clsPtr->name << endl;
 
         for (int i = fs->first(); fs->more(i); i = fs->next(i)){
             enterscope();
@@ -1196,6 +1222,7 @@ void CgenClassTable::code_class_method_definitions(){
             if (method){
                 str << clsPtr->name << "." << method->name << LABEL;
 
+                str << "\t# Prepare and save registers ..." << endl;
                 next_lable_id = 1;
                 size_t numOfArgs = method->formals->len();
                 emit_call_save_active_records(str);
@@ -1304,7 +1331,7 @@ namespace{
     size_t find_name(Symbol name, AttributeMap& tbl){
         if (tbl.empty()){
             if (cgen_debug){
-                cout << "<<<<<< unable to find " << name << " from map... " << endl;
+                cout << "!!! <<< unable to find " << name << " from map... " << endl;
             }
             return 0;
         }
@@ -1325,11 +1352,12 @@ size_t CgenNode::get_attr_offset(Symbol attr){
        if (!m_attrMapBuilt){
            get_feature_list(false); 
        }
+       //if (cgen_debug) cout << "<<<@@@ find attr map " << attr << " from class " << name << endl;
        return find_name(attr, m_attrMap);
 }
 
 size_t CgenNode::get_method_offset(Symbol method){
-    if (cgen_debug) cout << "<<< Finding method " << method << endl;
+    //if (cgen_debug) cout << "<<< Finding method " << method << endl;
     if (!m_methodMapBuilt){
         get_feature_list(); 
     }
@@ -1365,8 +1393,9 @@ FeatureNameList CgenNode::get_feature_list(bool check_on_method){
     }
 
     if (cgen_debug){
-        cout << "Class " << name << ": number of " << (check_on_method ? "methods:" : "attrs:") << (features_list.size()) << endl;
+        cout << "<<< Class " << name << ": number of " << (check_on_method ? "methods:" : "attrs:") << (features_list.size()) << endl;
     }
+
     //build attribute map for offset calculation
     if ((!m_attrMapBuilt) && (!check_on_method)){
         size_t offset = 3; //classid + size + dispTable
@@ -1374,7 +1403,15 @@ FeatureNameList CgenNode::get_feature_list(bool check_on_method){
                 it != itEnd; ++it){
             m_attrMap[it->second.first] = offset++;
         }
+        if (cgen_debug){
+            cout << "<<<@@@ attr map for " << name << ":" ;
+            for (AttributeMap::iterator it = m_attrMap.begin(), itEnd = m_attrMap.end(); it!= itEnd; ++it){
+                cout << it->first << "->" << it->second << ",";
+            }
+            cout << endl;
+        }
         m_attrMapBuilt = true;
+
     }
     if ((!m_methodMapBuilt) && (check_on_method)){
         size_t offset = 0;
@@ -1402,7 +1439,7 @@ void assign_class::code(ostream &s) {
     s << "\t# Assign begin..." << endl;
     expr->code(s);
 
-    CgenNodeP cls = g_clsTablePtr->lookup(SELF_TYPE);
+    CgenNodeP cls = g_clsTablePtr->lookup(self);
     if (!cls){
         assert(!"Bad scope for object class!");
     }
@@ -1413,9 +1450,9 @@ void assign_class::code(ostream &s) {
             if (info.location == LOC_FP){
                 s << SW << ACC << " " << info.offset * WORD_SIZE << "(" << FP << ")" << endl;
             }else if (info.location == LOC_ARG){
-                s << SW << ACC << " " << "$a" << info.offset << endl;
+                s << MOVE << "$a" << info.offset << " " << ACC << endl;
             }else if (info.location == LOC_TEMP){
-                s << SW << ACC << " " << "$t" << info.offset << endl;
+                s << MOVE << "$t" << info.offset << " " << ACC << endl;
             }
         }else{
             assert(!"Name lookup error!");
@@ -1437,14 +1474,15 @@ namespace{
         //parent arguments' registers needs to be saved to be referenced later
         s << "\t#@ dispatch prepare, save registers..." << endl;
         emit_addiu(SP, SP, -4 - 4 * numOfArgRegs, s);
+
         for (int i = 0; i < numOfArgRegs; ++i){
             s << SW << "$a" << (i + 1) << " " << 4*(numOfArgRegs + 1 - i) << "($sp)" << endl;
         }
         emit_store(SELF, 1, SP, s);
 
         s << "\t#@ evaluate actual parameters and save into registers/stack" << endl;
-        Symbol objClassType = obj_type;
-        CgenNodeP classPtr = g_clsTablePtr->lookup(objClassType);
+
+        CgenNodeP classPtr = g_clsTablePtr->lookup(obj_type);
         if (!classPtr){
             assert(!"undefined class found!");
             return;
@@ -1468,25 +1506,27 @@ namespace{
         }
 
         //formal parameter generation and save into stack/registers
-        for (int i = actual->len() - 1; i >= 0; --i){
-            actual->nth(i)->code(s);
-            //The arg name might be referenced within the function, so
-            // read the formal name first
-            formal_class* formal = dynamic_cast<formal_class*>(formals->nth(i));
-            assert(formal);
-            //save addr info 
-            RegAddrInfo& info = g_varTable[formal->name];
+        if (actual->len() > 0){
+            for (int i = actual->len() - 1; i >= 0; --i){
+                actual->nth(i)->code(s);
+                //The arg name might be referenced within the function, so
+                // read the formal name first
+                formal_class* formal = dynamic_cast<formal_class*>(formals->nth(i));
+                assert(formal);
+                //save addr info 
+                RegAddrInfo& info = g_varTable[formal->name];
 
-            if (i < 3){
-                //save result from acc to registers a1/a2/a3
-                s << MOVE << "$a" << (i+1) <<  " " << ACC << endl;
-                info.location = LOC_ARG;
-                info.offset = (i+1);
-            }else{
-                //save in stack, but won't be popped out until done 
-                emit_push(ACC, s);
-                info.location = LOC_FP;
-                info.offset = g_current_sp_offset++;
+                if (i < 3){
+                    //save result from acc to registers a1/a2/a3
+                    s << MOVE << "$a" << (i+1) <<  " " << ACC << endl;
+                    info.location = LOC_ARG;
+                    info.offset = (i+1);
+                }else{
+                    //save in stack, but won't be popped out until done 
+                    emit_push(ACC, s);
+                    info.location = LOC_FP;
+                    info.offset = g_current_sp_offset++;
+                }
             }
         }
 
@@ -1528,9 +1568,13 @@ namespace{
             s << "\t#@ used stack space rewinding..." << endl;
             emit_addiu(SP, SP, (formals->len() - 3) * 4, s);
         }
-        for (int i = formals->len() - 1; i >= 0; --i){
-            g_varTable.erase((dynamic_cast<formal_class*>(formals->nth(i)))->name);
+
+        if (formals->len() > 0){
+            for (int i = formals->len() - 1; i >= 0; --i){
+                g_varTable.erase((dynamic_cast<formal_class*>(formals->nth(i)))->name);
+            }
         }
+        
     }
 }
 
@@ -1540,7 +1584,18 @@ void static_dispatch_class::code(ostream &s) {
 }
 
 void dispatch_class::code(ostream &s) {
-    dispatch_common(expr, name, actual, expr->get_type(), s);
+    Symbol type = expr->get_type();
+    if (expr->get_type() == SELF_TYPE){
+        CgenNode* cls = g_clsTablePtr->lookup(self);
+        if (!cls){
+            assert(!"self type not found!");
+        }
+        type = cls->name;
+    }
+    if (cgen_debug){
+        cout << "dispatch on expr type:" << type << endl;
+    }
+    dispatch_common(expr, name, actual, type, s);
 }
 
 void cond_class::code(ostream &s) {
