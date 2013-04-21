@@ -966,31 +966,6 @@ namespace{
         return item.first == clsName;
     }
     
-    void load_variable_to_a0(Symbol name, ostream& s){
-        CgenNodeP cls = g_clsTablePtr->lookup(self);
-        if (!cls){
-            assert(!"Bad scope for object class!");
-        }
-        size_t offset = cls->get_attr_offset(name);
-        s << "\t# <<< name: " << name << ", offset = " << offset << endl;
-        if (offset == 0){
-            if (g_varTable.find(name) != g_varTable.end()){
-                RegAddrInfo& info = g_varTable[name];
-                if (info.location == LOC_FP){
-                    s << LW << ACC << " " << -1 * info.offset * WORD_SIZE << "(" << FP << ")" << endl;
-                }else if (info.location == LOC_ARG){
-                    s << MOVE << ACC << " " << "$a" << info.offset << endl;
-                }else if (info.location == LOC_TEMP){
-                    s << MOVE << ACC << " " << "$t" << info.offset << endl;
-                }
-            }else{
-                assert("name not found in class or varTable!");
-            }
-        }else{
-            emit_load(ACC, offset, SELF, s);
-        }
-    }
-
     void new_location_for_symbol(Symbol name, char* reg, ostream& s){
         //allocate space to save the new identifier
         RegAddrInfo& addr = g_varTable[name];
@@ -1006,6 +981,51 @@ namespace{
             RegAddrInfo& addr = g_varTable[name];
             g_current_sp_offset--;
             emit_addiu(SP, SP, 4, s);
+        }
+    }
+
+    //save register value to symbol location
+    void save_reg_in_symbol_location(char* reg, Symbol name, ostream& s){
+        if (g_varTable.find(name) != g_varTable.end()){
+            RegAddrInfo& info = g_varTable[name];
+            if (info.location == LOC_FP){
+                s << SW << reg << " " << -1 * info.offset * WORD_SIZE << "(" << FP << ")" << endl;
+            }else if (info.location == LOC_ARG){
+                s << MOVE << "$a" << info.offset << " " << reg << endl;
+            }else if (info.location == LOC_TEMP){
+                s << MOVE << "$t" << info.offset << " " << reg << endl;
+            }
+        }
+    }
+
+    void load_reg_from_symbol_location(char* reg, Symbol name, ostream& s){
+        if (g_varTable.find(name) != g_varTable.end()){
+            RegAddrInfo& info = g_varTable[name];
+            if (info.location == LOC_FP){
+                s << LW << reg << " " << -1 * info.offset * WORD_SIZE << "(" << FP << ")" << endl;
+            }else if (info.location == LOC_ARG){
+                s << MOVE << reg << " $a" << info.offset << endl;
+            }else if (info.location == LOC_TEMP){
+                s << MOVE << reg << " $t" << info.offset << endl;
+            }
+        }
+    }
+    
+    void load_variable_to_a0(Symbol name, ostream& s){
+        CgenNodeP cls = g_clsTablePtr->lookup(self);
+        if (!cls){
+            assert(!"Bad scope for object class!");
+        }
+        size_t offset = cls->get_attr_offset(name);
+        if (offset == 0){
+            if (g_varTable.find(name) != g_varTable.end()){
+                load_reg_from_symbol_location(ACC, name, s);
+            }else{
+                assert(!"name not found in class or varTable!");
+            }
+        }else{
+            s << "\t# <<< load attribute name: " << name << endl;
+            emit_load(ACC, offset, SELF, s);
         }
     }
 }
@@ -1220,10 +1240,10 @@ void CgenClassTable::code_class_method_definitions(){
             method_class* method = dynamic_cast<method_class*>(fs->nth(i));
 
             if (method){
+                //registers are already assigned at callee side
                 str << clsPtr->name << "." << method->name << LABEL;
-
                 str << "\t# Prepare and save registers ..." << endl;
-                next_lable_id = 1;
+                //next_lable_id = 1;
                 size_t numOfArgs = method->formals->len();
                 emit_call_save_active_records(str);
 
@@ -1238,14 +1258,26 @@ void CgenClassTable::code_class_method_definitions(){
                         addrInfo.offset = i + 1; 
                     }else{
                         //Those arguments saved in stack below our fp and registers
-                        // below fp, 0:ra, -1:s0, -2:oldfp -3:3, -4:4
+                        // below fp, 0:ra, -1:s0, -2:oldfp -3:arg3, -4:arg4
                         //  ..., -i:arg(i), ..., -(n-1) : arg(n-1)
                         addrInfo.location = LOC_FP;
                         addrInfo.offset = -1 * i;
                     }
                 }
+
                 str << "\t# Generate method body experissions..." << endl;
                 method->expr->code(str);
+
+                //exit scope for names
+                //names shall be popped directly
+                for (size_t i = 0; i < numOfArgs; ++i){
+                    formal_class* argInfo = dynamic_cast<formal_class*>(method->formals->nth(i));
+                    g_varTable.erase(argInfo->name);
+                }
+                if (numOfArgs > 3){
+                    emit_addiu(SP, SP, -1 * (numOfArgs - 3) * 4, str);
+                }
+
                 str << "\t# Save and return ..." << endl;
                 emit_call_save_and_return(str);
             }
@@ -1436,7 +1468,7 @@ FeatureNameList CgenNode::get_feature_list(bool check_on_method){
 
 
 void assign_class::code(ostream &s) {
-    s << "\t# Assign begin..." << endl;
+    s << "\t# Assign begin...,target = " << name << endl;
     expr->code(s);
 
     CgenNodeP cls = g_clsTablePtr->lookup(self);
@@ -1448,7 +1480,7 @@ void assign_class::code(ostream &s) {
         if (g_varTable.find(name) != g_varTable.end()){
             RegAddrInfo& info = g_varTable[name];
             if (info.location == LOC_FP){
-                s << SW << ACC << " " << info.offset * WORD_SIZE << "(" << FP << ")" << endl;
+                s << SW << ACC << " " << -1 * info.offset * WORD_SIZE << "(" << FP << ")" << endl;
             }else if (info.location == LOC_ARG){
                 s << MOVE << "$a" << info.offset << " " << ACC << endl;
             }else if (info.location == LOC_TEMP){
@@ -1472,7 +1504,7 @@ namespace{
         numOfArgRegs = numOfArgRegs > 3 ? 3 : numOfArgRegs;
 
         //parent arguments' registers needs to be saved to be referenced later
-        s << "\t#@ dispatch prepare, save registers..." << endl;
+        s << "\t#@ dispatch " << name << ": save registers..." << endl;
         emit_addiu(SP, SP, -4 - 4 * numOfArgRegs, s);
 
         for (int i = 0; i < numOfArgRegs; ++i){
@@ -1480,8 +1512,8 @@ namespace{
         }
         emit_store(SELF, 1, SP, s);
 
-        s << "\t#@ evaluate actual parameters and save into registers/stack" << endl;
 
+        s << "\t#@ evaluate actual parameters and save into registers/stack" << endl;
         CgenNodeP classPtr = g_clsTablePtr->lookup(obj_type);
         if (!classPtr){
             assert(!"undefined class found!");
@@ -1505,17 +1537,49 @@ namespace{
             }
         }
 
+        VarAddrTable backupTable;
         //formal parameter generation and save into stack/registers
         if (actual->len() > 0){
+            //need to keep whether a new name is added
             for (int i = actual->len() - 1; i >= 0; --i){
-                actual->nth(i)->code(s);
                 //The arg name might be referenced within the function, so
                 // read the formal name first
                 formal_class* formal = dynamic_cast<formal_class*>(formals->nth(i));
-                assert(formal);
+
+                s << "\t#<<< evaluate argument " << (i+1) << endl;
+                assign_class* assign = dynamic_cast<assign_class*>(actual->nth(i));
+                if (assign){
+                    assign->expr->code(s); //save in ACC
+                }else{
+                    actual->nth(i)->code(s);
+                }
+
+                if (g_varTable.find(formal->name) == g_varTable.end()){
+                    s << "\t# <<< add new name " << formal->name << " to scope now..." << endl;
+                }else{
+                    //save old address info since the place would be overwritten???
+                    s << "\t# <<< old name " << formal->name << " added to backup store and restore to t1..." << endl;
+                    backupTable[formal->name] = g_varTable[formal->name];
+
+                    //save the address with a new location
+                    RegAddrInfo& info = g_varTable[formal->name];
+                    if (info.location == LOC_FP){
+                        emit_load(T1, -1 * info.offset, FP, s);
+                    }else if (info.location == LOC_ARG){
+                        s << MOVE << T1 << " " << "$a" << info.offset << endl;
+                    }else{
+                        //TEMP
+                        s << MOVE << T1 << " " << "$t" << info.offset << endl;
+                    }
+
+                    std::ostringstream strm;
+                    strm << "_hidden_" << formal->name;
+                    Symbol backupName = idtable.add_string(strdup(strm.str().c_str()));
+                    new_location_for_symbol(backupName, T1, s);
+                }
+
                 //save addr info 
                 RegAddrInfo& info = g_varTable[formal->name];
-
                 if (i < 3){
                     //save result from acc to registers a1/a2/a3
                     s << MOVE << "$a" << (i+1) <<  " " << ACC << endl;
@@ -1527,14 +1591,17 @@ namespace{
                     info.location = LOC_FP;
                     info.offset = g_current_sp_offset++;
                 }
+
+
             }
         }
 
-        s << "\t#@ dispatch - evaluate and set new $s0 ..." << endl;
+
+        s << "\t#<<< dispatch - evaluate and set new $s0 ..." << endl;
         expr->code(s);
         emit_move(SELF, ACC, s);
 
-        s << "\t#@ dispatch do the call ..." << endl;
+        s << "\t#<<< dispatch do the call ..." << endl;
         //call function
         size_t method_offset = clsPtr->get_method_offset(name);
         if (cgen_debug) cout << "get method offset for:" << name << " from class:" << clsPtr->name << ",offset=" << method_offset << endl;
@@ -1553,7 +1620,7 @@ namespace{
         emit_jalr(T1, s);
 
         //need to restore self here
-        s<< "\t#@ dispatch restore self/a1/a2/a3..." << endl;
+        s<< "\t#<<< dispatch " << name << " done, restore registers ..." << endl;
         emit_load(SELF, 1, SP, s);
 
         for (int i = 0; i < numOfArgRegs; ++i){
@@ -1571,7 +1638,24 @@ namespace{
 
         if (formals->len() > 0){
             for (int i = formals->len() - 1; i >= 0; --i){
-                g_varTable.erase((dynamic_cast<formal_class*>(formals->nth(i)))->name);
+                Symbol symName = (dynamic_cast<formal_class*>(formals->nth(i)))->name;
+                if (backupTable.find(symName) != backupTable.end()){
+                    s << "\t# >>> name:" <<  symName << " addr restored now!" << endl;
+                    g_varTable[symName] = backupTable[symName];
+
+                    //load and restore address value into t1 and save into location
+                    std::ostringstream strm;
+                    strm << "_hidden_" << symName;
+                    Symbol hidden_name = idtable.lookup_string(const_cast<char*>(strm.str().c_str()));
+                    RegAddrInfo& info = g_varTable[hidden_name]; //must on stack
+                    emit_load(T1, -1 * info.offset, FP, s);
+
+                    g_varTable.erase(hidden_name);
+                    save_reg_in_symbol_location(T1, symName, s);
+                }else{
+                    s << "\t# >>> name:" <<  symName << " out of scope now!" << endl;
+                    g_varTable.erase(symName);
+                }
             }
         }
         
@@ -1874,13 +1958,13 @@ void bool_const_class::code(ostream& s)
 
 
 void new__class::code(ostream &s) {
-    s << "\t#@@ new object begin " << endl;
+    s << "\t#<<< new object begin " << endl;
     CgenNode* clsPtr = g_clsTablePtr->lookup(type_name);
     emit_partial_load_address(ACC, s);
     s << clsPtr->name << PROTOBJ_SUFFIX << endl;
     emit_jal("Object.copy", s);
     s << JAL << type_name << CLASSINIT_SUFFIX << endl;
-    s << "\t#@@ new object end " << endl;
+    s << "\t#>>> new object end " << endl;
 }
 
 void isvoid_class::code(ostream &s) {
