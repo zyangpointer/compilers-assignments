@@ -643,7 +643,7 @@ void CgenClassTable::code_constants()
   //
   // Add constants that are required by the code generator.
   //
-  //stringtable.add_string(__FILE__);
+  stringtable.add_string("test.cl");
   stringtable.add_string("");
   inttable.add_string("0");
 
@@ -1492,7 +1492,9 @@ void static_dispatch_class::code(ostream &s) {
 
     int dispatch_call = next_lable_id++;
     emit_bne(SELF, ZERO, dispatch_call, s);
-    emit_load_string(ACC,stringtable.lookup_string("0"), s);
+    s << "\t# Abort now..." << endl;    
+
+    emit_load_string(ACC,stringtable.lookup_string("test.cl"), s);
     emit_load_imm(T1, 1, s);
     emit_jal("_dispatch_abort", s);
 
@@ -1592,9 +1594,11 @@ void dispatch_class::code(ostream &s) {
     size_t method_offset = clsPtr->get_method_offset(name);
     if (cgen_debug) cout << "get method offset for:" << name << " from class:" << clsPtr->name << ",offset=" << method_offset << endl;
 
-    int dispatch_call = next_lable_id++;
+    int dispatch_call = next_lable_id++;    
     emit_bne(SELF, ZERO, dispatch_call, s);
-    emit_load_string(ACC,stringtable.lookup_string(""), s);
+
+    s << "\t# Abort now..." << endl;
+    emit_load_string(ACC,stringtable.lookup_string("test.cl"), s);
     emit_load_imm(T1, 1, s);
     emit_jal("_dispatch_abort", s);
 
