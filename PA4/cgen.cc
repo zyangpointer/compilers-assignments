@@ -1504,14 +1504,13 @@ namespace{
         numOfArgRegs = numOfArgRegs > 3 ? 3 : numOfArgRegs;
 
         //parent arguments' registers needs to be saved to be referenced later
-        s << "\t#@ dispatch " << name << ": save registers..." << endl;
+        s << "\t#@ dispatch " << name << ": save arg registers..." << endl;
         emit_addiu(SP, SP, -4 - 4 * numOfArgRegs, s);
 
         for (int i = 0; i < numOfArgRegs; ++i){
             s << SW << "$a" << (i + 1) << " " << 4*(numOfArgRegs + 1 - i) << "($sp)" << endl;
         }
         emit_store(SELF, 1, SP, s);
-
 
         s << "\t#@ evaluate actual parameters and save into registers/stack" << endl;
         CgenNodeP classPtr = g_clsTablePtr->lookup(obj_type);
@@ -1521,6 +1520,7 @@ namespace{
         }
         if (cgen_debug) cout << "Dispatch object class is:" << classPtr->name << endl;
 
+        //identify method formal signature first
         Formals formals = NULL;
         CgenNodeP clsPtr = classPtr;
         while(formals == NULL){
@@ -1535,8 +1535,8 @@ namespace{
                 //find in parent
                 clsPtr = clsPtr->get_parentnd();
             }
-        }
-
+        }        
+        
         VarAddrTable backupTable;
         //formal parameter generation and save into stack/registers
         if (actual->len() > 0){
@@ -1546,7 +1546,7 @@ namespace{
                 // read the formal name first
                 formal_class* formal = dynamic_cast<formal_class*>(formals->nth(i));
 
-                s << "\t#<<< evaluate argument " << (i+1) << endl;
+                s << "\t#<<< " << name << " evaluate argument " << (i+1) << endl;
                 assign_class* assign = dynamic_cast<assign_class*>(actual->nth(i));
                 if (assign){
                     assign->expr->code(s); //save in ACC
@@ -1554,6 +1554,7 @@ namespace{
                     actual->nth(i)->code(s);
                 }
 
+                //check for name conflicts
                 if (g_varTable.find(formal->name) == g_varTable.end()){
                     s << "\t# <<< add new name " << formal->name << " to scope now..." << endl;
                 }else{
@@ -1561,21 +1562,19 @@ namespace{
                     s << "\t# <<< old name " << formal->name << " added to backup store and restore to t1..." << endl;
                     backupTable[formal->name] = g_varTable[formal->name];
 
-                    //save the address with a new location
-                    RegAddrInfo& info = g_varTable[formal->name];
-                    if (info.location == LOC_FP){
-                        emit_load(T1, -1 * info.offset, FP, s);
-                    }else if (info.location == LOC_ARG){
-                        s << MOVE << T1 << " " << "$a" << info.offset << endl;
-                    }else{
-                        //TEMP
-                        s << MOVE << T1 << " " << "$t" << info.offset << endl;
-                    }
+                    if (i > 3){
+                        //address will be overritten on stack!
+                        RegAddrInfo& info = g_varTable[formal->name];
+                        assert(info.location == LOC_FP);
+                        load_reg_from_symbol_location(T1, formal->name, s);
 
-                    std::ostringstream strm;
-                    strm << "_hidden_" << formal->name;
-                    Symbol backupName = idtable.add_string(strdup(strm.str().c_str()));
-                    new_location_for_symbol(backupName, T1, s);
+                        std::ostringstream strm;
+                        strm << "_hidden_" << formal->name;
+                        Symbol backupName = idtable.add_string(strdup(strm.str().c_str()));
+                        new_location_for_symbol(backupName, T1, s);
+                    }else{
+                        //just backup is okay, using new registers while old already saved
+                    }
                 }
 
                 //save addr info 
@@ -1591,17 +1590,15 @@ namespace{
                     info.location = LOC_FP;
                     info.offset = g_current_sp_offset++;
                 }
-
-
             }
         }
 
-
-        s << "\t#<<< dispatch - evaluate and set new $s0 ..." << endl;
+        //set new a0 since self can only change here!
+        s << "\t#<<< " << name << " - evaluate and set new $s0 ..." << endl;
         expr->code(s);
         emit_move(SELF, ACC, s);
 
-        s << "\t#<<< dispatch do the call ..." << endl;
+        s << "\t#<<< " << name << " - do the call ..." << endl;
         //call function
         size_t method_offset = clsPtr->get_method_offset(name);
         if (cgen_debug) cout << "get method offset for:" << name << " from class:" << clsPtr->name << ",offset=" << method_offset << endl;
@@ -1620,11 +1617,11 @@ namespace{
         emit_jalr(T1, s);
 
         //need to restore self here
-        s<< "\t#<<< dispatch " << name << " done, restore registers ..." << endl;
+        s<< "\t#<<< " << name << " done, restore registers ..." << endl;
         emit_load(SELF, 1, SP, s);
 
         for (int i = 0; i < numOfArgRegs; ++i){
-            s << LW << "$a" << (i+1) << " " << (numOfArgRegs + 1 - i)*4 << "($s0)" << endl;
+            s << LW << "$a" << (i+1) << " " << (numOfArgRegs + 1 - i)*4 << "($sp)" << endl;
         }
         emit_addiu(SP, SP, (numOfArgRegs + 1) * 4, s);
 
@@ -1632,7 +1629,7 @@ namespace{
         // pop used stack space and remove from varTable
         // The name itself will be popped
         if (formals->len() > 3){
-            s << "\t#@ used stack space rewinding..." << endl;
+            s << "\t#@ " << name << ": used stack space rewinding..." << endl;
             emit_addiu(SP, SP, (formals->len() - 3) * 4, s);
         }
 
@@ -1640,20 +1637,26 @@ namespace{
             for (int i = formals->len() - 1; i >= 0; --i){
                 Symbol symName = (dynamic_cast<formal_class*>(formals->nth(i)))->name;
                 if (backupTable.find(symName) != backupTable.end()){
-                    s << "\t# >>> name:" <<  symName << " addr restored now!" << endl;
+                    s << "\t# >>> name: " <<  symName << " addr restored now!" << endl;
                     g_varTable[symName] = backupTable[symName];
 
-                    //load and restore address value into t1 and save into location
-                    std::ostringstream strm;
-                    strm << "_hidden_" << symName;
-                    Symbol hidden_name = idtable.lookup_string(const_cast<char*>(strm.str().c_str()));
-                    RegAddrInfo& info = g_varTable[hidden_name]; //must on stack
-                    emit_load(T1, -1 * info.offset, FP, s);
+                    if (i > 3){
+                        //load and restore address value into t1 and save into location
+                        std::ostringstream strm;
+                        strm << "_hidden_" << symName;
+                        Symbol hidden_name = idtable.lookup_string(const_cast<char*>(strm.str().c_str()));
+                        RegAddrInfo& info = g_varTable[hidden_name]; //must on stack
+                        emit_load(T1, -1 * info.offset, FP, s);
+                        save_reg_in_symbol_location(T1, symName, s);
 
-                    g_varTable.erase(hidden_name);
-                    save_reg_in_symbol_location(T1, symName, s);
+                        //erase hidden_name
+                        free_symbol_location(hidden_name, s);
+                        g_varTable.erase(hidden_name);
+                    }else{
+                        //will restore to registers
+                    }
                 }else{
-                    s << "\t# >>> name:" <<  symName << " out of scope now!" << endl;
+                    s << "\t# >>> name: " <<  symName << " out of scope now!" << endl;
                     g_varTable.erase(symName);
                 }
             }
