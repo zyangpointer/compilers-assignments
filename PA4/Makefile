@@ -64,6 +64,10 @@ dotest:	cgen example.cl
 	@echo "\nRunning code generator on example.cl\n"
 	-./mycoolc example.cl
 
+debug: cgen test.cl 
+	@echo "Testing generated code...\n"
+	-./mycoolc -c test.cl
+
 test: cgen test.cl 
 	@echo "Testing generated code...\n"
 	-./mycoolc test.cl

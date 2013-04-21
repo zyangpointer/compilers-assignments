@@ -131,6 +131,7 @@ namespace{
 
     size_t first_attr_offset = 3;
     size_t next_lable_id = 0;
+
 }
 
 //  BoolConst is a class that implements code generation for operations
@@ -662,6 +663,7 @@ CgenClassTable::CgenClassTable(Classes classes, ostream& s) :
     install_basic_classes();
     install_classes(classes);
     build_inheritance_tree();
+    build_class_tags();
 
     code();
     exitscope();
@@ -837,6 +839,23 @@ void CgenClassTable::set_relations(CgenNodeP nd)
   parent_node->add_child(nd);
 }
 
+void CgenClassTable::build_class_tags(){
+    m_tagIdList.push_back(std::make_pair(Object, objectclasstag));
+    m_tagIdList.push_back(std::make_pair(IO, ioclasstag));
+    m_tagIdList.push_back(std::make_pair(Int, intclasstag));
+    m_tagIdList.push_back(std::make_pair(Bool, boolclasstag));
+    m_tagIdList.push_back(std::make_pair(Str, stringclasstag));
+
+    size_t tag = stringclasstag + 1;    
+    //class tags start with stringclasstag + 1
+    for(List<CgenNode> *l = nds; l; l = l->tl()){
+        CgenNode* node = l->hd();
+        if (!(node->basic())){
+            m_tagIdList.push_back(std::make_pair(node->name, tag++)); 
+        }
+    }
+}
+
 void CgenNode::add_child(CgenNodeP n)
 {
   children = new List<CgenNode>(n,children);
@@ -862,6 +881,7 @@ void CgenClassTable::code()
     if (cgen_debug) cout << "coding constants" << endl;
     code_constants();
 
+    //class ids should be built first
     code_class_nameTab();
     code_class_objTab();
     code_class_dispTab();
@@ -881,22 +901,36 @@ CgenNodeP CgenClassTable::root()
 }
 
 
-//various code generation
 void CgenClassTable::code_class_nameTab(){
+    //classname table should be organized by classtag id sequence
     str << CLASSNAMETAB << LABEL;
-    for(List<CgenNode> *l = nds; l; l = l->tl()){
-        CgenNode* hdr = l->hd();
-        Symbol clsName = hdr->get_name();
-        std::ostringstream strm;
-        strm << clsName;
+
+    std::ostringstream strm;
+    //builtin first by id sequences
+    Symbol basics[] = {Object, IO, Int, Bool, Str};
+    for (size_t i = 0; i < sizeof(basics)/sizeof(basics[0]); ++i){
+        strm.str("");strm.clear();
+        strm << basics[i];
+        if (cgen_debug) cout << "<<< checking builtin class " << strm.str() << endl; 
         StringEntryP entry = stringtable.lookup_string(const_cast<char*>(strm.str().c_str()));
-        if (entry){
-            str << WORD;
-            entry->code_ref(str);
-            str << endl;
-        }else{
-            if (cgen_debug){
-                cout << "Invalid class name:" << clsName << endl;
+        str << "\t#class name = " << strm.str() << endl;
+        str << WORD;
+        entry->code_ref(str);
+        str << endl;
+    }
+
+    //self-defined classes
+    for (size_t tagId = stringclasstag + 1; tagId < m_tagIdList.size(); ++tagId){
+        for (ClassTagTable::iterator it = m_tagIdList.begin(), itEnd = m_tagIdList.end();
+                it != itEnd; ++it){
+            if (it->second == tagId){
+                strm.clear();strm.str("");
+                strm << it->first;
+                StringEntryP entry = stringtable.lookup_string(const_cast<char*>(strm.str().c_str()));
+                str << "\t#class name = " << strm.str() << endl;
+                str << WORD;
+                entry->code_ref(str);
+                str << endl;
             }
         }
     }
@@ -927,7 +961,6 @@ void CgenClassTable::code_class_dispTab(){
 
 
 namespace{
-    typedef std::vector<std::pair<Symbol, int> > ClassTagTable;
     bool does_className_match(const ClassTagTable::value_type& item, Symbol clsName){
         return item.first == clsName;
     }
@@ -965,31 +998,15 @@ namespace{
     }
 }
 
+
 void CgenClassTable::code_protObjs(){
-    //identify a tag first
-    ClassTagTable clsTagList;
-    clsTagList.push_back(std::make_pair(Object, objectclasstag));
-    clsTagList.push_back(std::make_pair(IO, ioclasstag));
-    clsTagList.push_back(std::make_pair(Int, intclasstag));
-    clsTagList.push_back(std::make_pair(Bool, boolclasstag));
-    clsTagList.push_back(std::make_pair(Str, stringclasstag));
-
-    //class tags start with stringclasstag + 1
-    int tag = stringclasstag + 1;
-    for(List<CgenNode> *l = nds; l; l = l->tl()){
-        CgenNode* node = l->hd();
-        if (!(node->basic())){
-            clsTagList.push_back(std::make_pair(node->name, tag++)); 
-        }
-    }
-
     for(List<CgenNode> *l = nds; l; l = l->tl()){
         CgenNode* clsNodePtr = l->hd();
         Symbol clsName = clsNodePtr->get_name();
 
-        ClassTagTable::iterator it = std::find_if(clsTagList.begin(), clsTagList.end(),
+        ClassTagTable::iterator it = std::find_if(m_tagIdList.begin(), m_tagIdList.end(),
                 std::tr1::bind(does_className_match, std::tr1::placeholders::_1, clsName));
-        if (it != clsTagList.end()){
+        if (it != m_tagIdList.end()){
             str << WORD << "-1" << endl 
                 << clsName << PROTOBJ_SUFFIX << LABEL
                 << WORD << it->second << endl;
@@ -1145,6 +1162,7 @@ void CgenClassTable::code_basic_class_initializers(){
 }
 
 void CgenClassTable::code_class_method_definitions(){
+    str << "\t# Prepare and save registers ..." << endl;
     for(List<CgenNode> *l = nds; l; l = l->tl()){
 
         CgenNode* clsPtr = l->hd();
@@ -1183,7 +1201,9 @@ void CgenClassTable::code_class_method_definitions(){
                         addrInfo.offset = -1 * i;
                     }
                 }
+                str << "\t# Generate method body experissions..." << endl;
                 method->expr->code(str);
+                str << "\t# Save and return ..." << endl;
                 emit_call_save_and_return(str);
             }
 
@@ -1266,27 +1286,38 @@ namespace{
 
 namespace{
     size_t find_name(Symbol name, AttributeMap& tbl){
+        if (tbl.empty()){
+            if (cgen_debug){
+                cout << "<<<<<< unable to find " << name << " from map... " << endl;
+            }
+            return 0;
+        }
         if (tbl.find(name) == tbl.end()){
             if (cgen_debug){
-                cout << "@@@ symbol name " << name << " not in attr/method table" << endl;
+                cout << "@@@ symbol name " << name << " not in attr/method table" << endl << "<<<<<<";
+                for (AttributeMap::iterator it = tbl.begin(), it1 = tbl.end(); it != it1; ++it){
+                    cout << it->first << "->" << it->second << ",";
+                }
+                cout << endl;
             }
             return 0;
         }
         return tbl[name];
     }
 }
-size_t CgenNode::get_attr_offset(Symbol name){
+size_t CgenNode::get_attr_offset(Symbol attr){
        if (!m_attrMapBuilt){
            get_feature_list(false); 
        }
-       return find_name(name, m_attrMap);
+       return find_name(attr, m_attrMap);
 }
 
-size_t CgenNode::get_method_offset(Symbol name){
-       if (!m_methodMapBuilt){
-           get_feature_list(); 
-       }
-       return find_name(name, m_methodMap);
+size_t CgenNode::get_method_offset(Symbol method){
+    if (cgen_debug) cout << "<<< Finding method " << method << endl;
+    if (!m_methodMapBuilt){
+        get_feature_list(); 
+    }
+    return find_name(method, m_methodMap);
 }
 
 FeatureNameList CgenNode::get_feature_list(bool check_on_method){
@@ -1488,9 +1519,10 @@ void dispatch_class::code(ostream &s) {
     Symbol objClassType = expr->get_type();
     CgenNodeP classPtr = g_clsTablePtr->lookup(objClassType);
     if (!classPtr){
-        assert(!"undefined method!");
+        assert(!"undefined class found!");
         return;
     }
+    if (cgen_debug) cout << "Dispatch object class is:" << classPtr->name << endl;
 
     Formals formals = NULL;
     CgenNodeP clsPtr = classPtr;
@@ -1538,6 +1570,7 @@ void dispatch_class::code(ostream &s) {
     s << "\t#@ dispatch do the call ..." << endl;
     //call function
     size_t method_offset = clsPtr->get_method_offset(name);
+    if (cgen_debug) cout << "get method offset for:" << name << " from class:" << clsPtr->name << ",offset=" << method_offset << endl;
     emit_load(T1, 2, SELF, s); // offset 2 = dispTab
     emit_load(T1, method_offset, T1, s);
     emit_jalr(T1, s);
@@ -1851,7 +1884,12 @@ void no_expr_class::code(ostream &s) {
 
 void object_class::code(ostream &s) {
     s << "\t#@@@ object begin..." << endl;
-    load_variable_to_a0(name, s);
+    if (name == self){
+        s << "\t#<<< move s0 to a0 for self ..." << endl;
+        emit_move(ACC, SELF, s);
+    }else{
+        load_variable_to_a0(name, s);
+    }
     s << "\t#@@@ object done..." << endl;
 }
 

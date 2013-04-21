@@ -13,6 +13,8 @@ enum Basicness     {Basic, NotBasic};
 class CgenClassTable;
 typedef CgenClassTable *CgenClassTableP;
 
+typedef std::vector<std::pair<Symbol, size_t> > ClassTagTable;
+
 class CgenNode;
 typedef CgenNode *CgenNodeP;
 class CgenClassTable : public SymbolTable<Symbol,CgenNode> {
@@ -36,6 +38,8 @@ private:
    void code_bools(int);
    void code_select_gc();
    void code_constants();
+
+   void build_class_tags();
 
    void code_class_nameTab();
    void code_class_objTab();
@@ -63,6 +67,7 @@ public:
    void code();
    CgenNodeP root();
 
+   ClassTagTable m_tagIdList;
 };
 
 
