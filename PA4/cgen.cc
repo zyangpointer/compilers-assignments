@@ -1060,6 +1060,8 @@ void CgenClassTable::code_protObjs(){
                     }else if (it->second.second == Int){
                         IntEntry* entry = inttable.lookup_string("0");
                         entry->code_ref(str);
+                    }else if (it->second.second == Bool){
+                        falsebool.code_ref(str);
                     }else{
                         str << "0";
                     }
@@ -1157,7 +1159,9 @@ void CgenClassTable::code_class_initializers(){
             str << "\t# Save stack and registers..." << endl;
             emit_init_call_save_active_records(str);
             g_current_sp_offset = 1; //Initially, loc = fp + -1 * 4
+
             CgenNode* parent = node->get_parentnd();
+            str << "\t# Initialize parent first ..., $a0 already corret here!" << endl;
             if (parent){
                 if (cgen_debug)
                     cout << JAL << parent->name << "_init" << endl;
@@ -1166,6 +1170,7 @@ void CgenClassTable::code_class_initializers(){
                 //default parent is object is not specified
                 str << JAL << "Object_init" << endl;
             }
+
             Features fs = node->features;
             for (int i = fs->first(); fs->more(i); i = fs->next(i)){
                 attr_class* attrPtr = dynamic_cast<attr_class*>(fs->nth(i));
@@ -1176,22 +1181,33 @@ void CgenClassTable::code_class_initializers(){
                     // using get_attr_offset to decide absolute offset
                     if (typeid(*attrPtr->init) != typeid(no_expr_class)){
                         str << "\t# <<< initialize attribute..." << endl;
+                        emit_push(SELF, str);
+                        g_current_sp_offset++;
+
                         attrPtr->init->code(str);
                         emit_store(ACC, offset, SELF, str);
+                        emit_pop(SELF, str);
+                        g_current_sp_offset--;
+
                         str << "\t# <<< initialize attribute done..." << endl;
                     }else{
+                        //using default protObj - it's already initialized actually!
                         if ((attrPtr->type_decl == Str) || (attrPtr->type_decl == Bool) || (attrPtr->type_decl == Int)){
                             //default initialization for str/Bool/Int - using the boxed object and save a pointer
                             // save s0 first
+                            str << "\t# <<< init attribute " << attrPtr->name << endl;
                             emit_push(SELF, str);
+
                             emit_partial_load_address(ACC, str);
                             str << attrPtr->type_decl << PROTOBJ_SUFFIX << endl;
                             emit_jal("Object.copy", str);
                             str << JAL << attrPtr->type_decl << CLASSINIT_SUFFIX << endl;
-                            //retore s0
+                            //retore s0 and $a0
                             emit_pop(SELF, str);
                             emit_store(ACC, offset, SELF, str);
+                            str << "\t# <<< Attribute " << attrPtr->name << "initialized now" << endl;
                         }else{
+                            str << "\t# <<< Non-default attribute " << attrPtr->name << " set to zero " << endl;
                             str << "\t# Set zero for " << node->name << ":" << attrPtr->name << endl;
                             emit_store(ZERO, offset, SELF, str);
                         }
@@ -2013,9 +2029,10 @@ void isvoid_class::code(ostream &s) {
     int true_label = next_lable_id++;
     int false_label = next_lable_id++;
     
+    s << "\t#<<< isvoid begin " << endl;
     e1->code(s);
     emit_move(T1, ACC, s);
-    emit_bne(T1, ZERO, true_label, s);
+    emit_beq(T1, ZERO, true_label, s);
     emit_branch(false_label, s);
 
     int joint_label = next_lable_id++;
@@ -2028,6 +2045,7 @@ void isvoid_class::code(ostream &s) {
     emit_branch(joint_label, s);
 
     emit_label_def(joint_label, s);
+    s << "\t#<<< isvoid done " << endl;
 }
 
 void no_expr_class::code(ostream &s) {
