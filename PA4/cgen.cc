@@ -1540,19 +1540,9 @@ namespace{
         VarAddrTable backupTable;
         //formal parameter generation and save into stack/registers
         if (actual->len() > 0){
-            //need to keep whether a new name is added
+            //allocate locations for arguments
             for (int i = actual->len() - 1; i >= 0; --i){
-                //The arg name might be referenced within the function, so
-                // read the formal name first
                 formal_class* formal = dynamic_cast<formal_class*>(formals->nth(i));
-
-                s << "\t#<<< " << name << " evaluate argument " << (i+1) << endl;
-                assign_class* assign = dynamic_cast<assign_class*>(actual->nth(i));
-                if (assign){
-                    assign->expr->code(s); //save in ACC
-                }else{
-                    actual->nth(i)->code(s);
-                }
 
                 //check for name conflicts
                 if (g_varTable.find(formal->name) == g_varTable.end()){
@@ -1561,7 +1551,6 @@ namespace{
                     //save old address info since the place would be overwritten???
                     s << "\t# <<< old name " << formal->name << " added to backup store and restore to t1..." << endl;
                     backupTable[formal->name] = g_varTable[formal->name];
-
                     if (i > 3){
                         //address will be overritten on stack!
                         RegAddrInfo& info = g_varTable[formal->name];
@@ -1590,6 +1579,19 @@ namespace{
                     info.location = LOC_FP;
                     info.offset = g_current_sp_offset++;
                 }
+            }
+            
+            //evaluation actual parameters and place in location
+            for (int i = 0; i < actual->len(); ++i){
+                //The arg name might be referenced within the function, so
+                // read the formal name first
+                formal_class* formal = dynamic_cast<formal_class*>(formals->nth(i));
+
+                s << "\t#<<< " << name << " evaluate argument " << (i+1) << endl;
+                assign_class* assign = dynamic_cast<assign_class*>(actual->nth(i));
+                actual->nth(i)->code(s);
+
+                //TODO:set formal parameter's value to appropriate location
             }
         }
 
