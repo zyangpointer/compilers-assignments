@@ -353,8 +353,8 @@ static void emit_push(char *reg, ostream& str)
 }
 
 static void emit_pop(char* reg, ostream& str){
-    emit_load(reg, 0, SP, str);
     emit_addiu(SP, SP, 4, str);
+    emit_load(reg, 0, SP, str);
 }
 
 //
@@ -1754,6 +1754,7 @@ void cond_class::code(ostream &s) {
     emit_branch(false_label, s);
 
     int joint_label = next_lable_id++;
+    s << "\t# <<< Truth label = " << true_label << ", false label = " << false_label << endl;
     emit_label_def(true_label,s);
     then_exp->code(s);
     emit_move(T1, ACC, s);
@@ -1846,8 +1847,16 @@ void let_class::code(ostream &s) {
     if (init->get_type() == NULL){
         if (cgen_debug)
             cout << "<<< let statement, init type:" << (init->get_type() ? init->get_type() : No_type) << endl;
-        //Load zero here!
-        emit_move(ACC, ZERO, s);
+        if (type_decl == Int){
+            emit_load_int(ACC, 0, s);
+        }else if (type_decl == Bool){
+            emit_load_bool(ACC, falsebool, s);
+        }else if (type_decl == Str){
+            emit_load_string(ACC,stringtable.lookup_string(""), s);
+        }else{
+            //Load zero here!
+            emit_move(ACC, ZERO, s);
+        }
     }
     new_location_for_symbol(identifier, ACC, s);
     s << "\t#<<< let body ..." << endl;
@@ -1939,10 +1948,19 @@ void lt_class::code(ostream &s) {
 
 void eq_class::code(ostream &s) {
     s << "\t# @@@ Equal check begin..." << endl;
+
+    //T1/T2 can't be used since intermediate code may modify them
     e1->code(s);
-    emit_move(T1, ACC, s);
+    emit_push(ACC, s);
+    g_current_sp_offset++;
+
     e2->code(s);
-    emit_move(T2, ACC, s);
+    emit_push(ACC, s);
+    g_current_sp_offset++;
+
+    emit_pop(T2, s);
+    emit_pop(T1, s);
+    g_current_sp_offset -= 2;
 
     //now e1 in T1, e2 in a0
     int true_label = next_lable_id++;
@@ -1980,7 +1998,7 @@ void eq_class::code(ostream &s) {
 
     emit_label_def(joint_label, s);
     //emit_restore_temp_registers(s);
-    s << "#@@@ Equal check end..." << endl;
+    s << "\t#@@@ Equal check end..." << endl;
 }
 
 void leq_class::code(ostream &s) {
