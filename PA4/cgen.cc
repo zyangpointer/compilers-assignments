@@ -1741,6 +1741,8 @@ void dispatch_class::code(ostream &s) {
 }
 
 void cond_class::code(ostream &s) {
+    //TODO: check cond_class
+    s << "\t# if_stmt begin...." << endl;
     pred->code(s);
     //emit_save_temp_registers(s);
     emit_move(T1, ACC, s);
@@ -1763,7 +1765,8 @@ void cond_class::code(ostream &s) {
     emit_branch(joint_label, s);
 
     emit_label_def(joint_label, s);
-    //emit_restore_temp_registers(s);
+    emit_move(ACC, T1, s);
+    s << "\t# if_stmt end...." << endl;
 }
 
 void loop_class::code(ostream &s) {
@@ -1935,9 +1938,8 @@ void lt_class::code(ostream &s) {
 
 
 void eq_class::code(ostream &s) {
-    s << "#@@@ Equal check begin..." << endl;
+    s << "\t# @@@ Equal check begin..." << endl;
     e1->code(s);
-    //emit_save_temp_registers(s);
     emit_move(T1, ACC, s);
     e2->code(s);
     emit_move(T2, ACC, s);
@@ -1945,9 +1947,11 @@ void eq_class::code(ostream &s) {
     //now e1 in T1, e2 in a0
     int true_label = next_lable_id++;
     int false_label = next_lable_id++;
+    s << "\t# @@@ check pointer address first..." << endl;
     emit_beq(T1, T2, true_label, s);
     emit_beq(T1, ZERO, false_label, s);
     emit_beq(T2, ZERO, false_label, s);
+    s << "\t# @@@ check contained object now..." << endl;
     if (e1->get_type() == Int || e1->get_type() == Bool){
         s << "\t#<< compare Int/Bool contents..." << endl;
         emit_load(T1, first_attr_offset, T1, s);
@@ -1956,13 +1960,13 @@ void eq_class::code(ostream &s) {
         emit_branch(false_label, s);
     }else if(e1->get_type() == Str){
         s << "\t#<< compare String contents..." << endl;
-        emit_load(V0, first_attr_offset, T1, s);
-        emit_load(V1, first_attr_offset, T2, s);
-        emit_beq(V0, V1, true_label, s);
-        emit_load(T1, first_attr_offset + 1, T1, s);
-        emit_load(T2, first_attr_offset + 1, T2, s);
-        emit_beq(T1, T2, true_label, s);
-        emit_branch(false_label, s);
+        emit_load(T3, first_attr_offset, T1, s);
+        emit_load(T4, first_attr_offset, T2, s);
+        emit_bne(T3, T4, false_label, s);
+        emit_load(T3, first_attr_offset + 1, T1, s);
+        emit_load(T4, first_attr_offset + 1, T2, s);
+        emit_bne(T3, T4, false_label, s);
+        emit_branch(true_label, s);
     }
 
     int joint_label = next_lable_id++;
