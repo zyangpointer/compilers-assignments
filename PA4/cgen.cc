@@ -1008,6 +1008,8 @@ namespace{
             }else if (info.location == LOC_TEMP){
                 s << MOVE << reg << " $t" << info.offset << endl;
             }
+        }else{
+            assert("Name no longer available!");
         }
     }
     
@@ -1559,7 +1561,7 @@ namespace{
         VarAddrTable backupTable;
         //formal parameter generation and save into stack/registers
         if (numOfArgs > 0){
-            //evaluate argument expressions and save result to stack
+            //evaluate argument expressions and save value object to stack
             for (int i = 0; i < numOfArgs; ++i){
                 //A hidden location on the stack is used to save the value of arguments
                 formal_class* formal = dynamic_cast<formal_class*>(formals->nth(i));
@@ -1570,10 +1572,22 @@ namespace{
                 
                 std::ostringstream strm;
                 strm << "_value_of_" << formal->name;
+                std::string vnamestr = strm.str();
+                Symbol vName = stringtable.add_string(strdup(vnamestr.c_str()));
+                std::string hidName = std::string("_hidden_") + vnamestr;
+                Symbol hidSymName = stringtable.add_string(strdup(hidName.c_str()));
+                if (cgen_debug) cout << name << ": Adding hidden sym:" << hidName << endl;
+                if (g_varTable.find(vName) != g_varTable.end()){
+                    //TODO:Abstract this for backup/restore
+                    s << "\t# <<< " << name << " value object:" << formal->name 
+                        << " already exist, save to FP for later restore now..." << endl;
+                    load_reg_from_symbol_location(T1, vName, s);
+                    new_location_for_symbol(hidSymName, T1, s);
+                }
                 s << "\t#<<< " << name << " argument value:" <<  strm.str()
                     << " saved to FP offset " << g_current_sp_offset << endl;
-                Symbol backupName = stringtable.add_string(strdup(strm.str().c_str()));
-                new_location_for_symbol(backupName, ACC, s);
+                new_location_for_symbol(vName, ACC, s);
+
             }
 
             //allocate locations in cases of name conflicts
@@ -1582,7 +1596,7 @@ namespace{
                 //check for name conflicts
                 formal_class* formal = dynamic_cast<formal_class*>(formals->nth(i));
                 if (g_varTable.find(formal->name) == g_varTable.end()){
-                    s << "\t# <<< add new name " << formal->name << " to scope now..." << endl;
+                    s << "\t# <<< " << name << "- add new name " << formal->name << " to scope now..." << endl;
                 }else{
                     //save old address info since the place would be overwritten???
                     s << "\t# <<< old name " << formal->name << " added to backup store" << endl;
@@ -1595,7 +1609,7 @@ namespace{
 
                         std::ostringstream strm;
                         strm << "_hidden_" << formal->name;
-                        Symbol backupName = idtable.add_string(strdup(strm.str().c_str()));
+                        Symbol backupName = stringtable.add_string(strdup(strm.str().c_str()));
                         new_location_for_symbol(backupName, T1, s);
                     }else{
                         //just backup is okay, using new registers while old already saved
@@ -1623,6 +1637,7 @@ namespace{
                 }
 
                 //load value of formal name and save into given location
+                s << "\t# <<< " << name << " - load value of " << formal->name << " to T1 and then save to formal name " << endl;
                 std::ostringstream strm;
                 strm << "_value_of_" << formal->name;
                 load_reg_from_symbol_location(T1, stringtable.lookup_string(
@@ -1655,8 +1670,8 @@ namespace{
         emit_jalr(T1, s);
 
         //Restore and pop order
-        // 1. Pop hidden names
-        // 2. Pop value objects
+        // 1. Pop hidden objects and erase/restore names
+        // 2. Pop value objects and erase/restore names
         // 3. Pop restore s0
         // 4. Pop and restore registers
         s<< "\t#<<< " << name << " done, pop hidden objects and value objects..." << endl;
@@ -1689,15 +1704,31 @@ namespace{
                 }
             }
 
-            //Pop value objects
-            for (int i = 0; i < numOfArgs; ++i){
+            //Erase/restore value objects in the reverse order
+            for (int i = numOfArgs - 1; i >= 0; --i){
                 Symbol symName = (dynamic_cast<formal_class*>(formals->nth(i)))->name;
 
                 std::ostringstream strm;
                 strm << "_value_of_" << symName;
-                Symbol value_name = stringtable.lookup_string(const_cast<char*>(strm.str().c_str()));
-                s << "\t# >>> value of name: " <<  value_name << " addr restored now!" << endl;
-                free_symbol_location(value_name, s);
+                std::string vnamestr = strm.str();
+                std::string hidName = std::string("_hidden_") + vnamestr;
+
+                Symbol hidSym = stringtable.lookup_string(const_cast<char*>(hidName.c_str()));
+                Symbol vSym = stringtable.lookup_string(const_cast<char*>(vnamestr.c_str()));
+                if (g_varTable.find(hidSym) != g_varTable.end()){
+                    s << "\t# >>> value of name: " <<  vSym << " restored now!" << endl;
+                    //restore
+                    g_varTable[vSym] = g_varTable[hidSym];
+
+                    //erase hidden_name
+                    free_symbol_location(hidSym, s);
+                    g_varTable.erase(hidSym);
+                }else{
+                    //erase
+                    s << "\t# >>> value of name: " <<  vSym << " space freed now!" << endl;
+                    free_symbol_location(vSym, s);
+                    g_varTable.erase(vSym);
+                }
             }
         }
 
