@@ -1579,15 +1579,15 @@ namespace{
                 Symbol hidSymName = stringtable.add_string(strdup(hidName.c_str()));
                 if (cgen_debug) cout << name << ": Adding hidden sym:" << hidName << endl;
                 if (g_varTable.find(vName) != g_varTable.end()){
-                    //TODO:Abstract this for backup/restore
                     s << "\t# <<< " << name << " value object:" << formal->name 
-                        << " already exist, save to FP for later restore now..." << endl;
-                    load_reg_from_symbol_location(T1, vName, s);
-                    new_location_for_symbol(hidSymName, T1, s);
+                        << " already exist, do backup for later restore now..." << endl;
+                    g_varTable[hidSymName] = g_varTable[vName];
+                    new_location_for_symbol(vName, ACC, s);
+                }else{
+                    s << "\t#<<< " << name << " argument value:" <<  strm.str()
+                        << " will be saved to FP offset " << g_current_sp_offset << endl;
+                    new_location_for_symbol(vName, ACC, s);
                 }
-                s << "\t#<<< " << name << " argument value:" <<  strm.str()
-                    << " saved to FP offset " << g_current_sp_offset << endl;
-                new_location_for_symbol(vName, ACC, s);
             }
 
             //3. Formal name objects intended for stack name handling - save old name if needed
@@ -1598,21 +1598,18 @@ namespace{
                 if (g_varTable.find(formal->name) == g_varTable.end()){
                     s << "\t# <<< " << name << "- add new name " << formal->name << " to scope now..." << endl;
                 }else{
-                    //save old address info since the place would be overwritten???
-                    s << "\t# <<< old name " << formal->name << " added to backup store" << endl;
-                    backupTable[formal->name] = g_varTable[formal->name];
-                    if (i > 2){
-                        //address will be overritten on stack!
-                        RegAddrInfo& info = g_varTable[formal->name];
-                        assert(info.location == LOC_FP);
-                        load_reg_from_symbol_location(T1, formal->name, s);
+                    //save old address info since the place would be overwritten!!!
+                    std::ostringstream strm;
+                    strm << "_hidden_" << formal->name;
+                    Symbol hidName = stringtable.add_string(strdup(strm.str().c_str()));
+                    g_varTable[hidName] = g_varTable[formal->name];
 
-                        std::ostringstream strm;
-                        strm << "_hidden_" << formal->name;
-                        Symbol backupName = stringtable.add_string(strdup(strm.str().c_str()));
-                        new_location_for_symbol(backupName, T1, s);
+                    if (i > 2){
+                        s << "\t# <<< old name " << formal->name << " added to backup store, allocate new space on stack for formal name" << formal->name << endl;
+
+                        new_location_for_symbol(formal->name, ACC, s);
                     }else{
-                        //just backup is okay, using new registers while old already saved
+                        //just backup is okay, no new space needed
                     }
                 }
             }
@@ -1685,34 +1682,26 @@ namespace{
             size_t garbage_space = 0;
             for (int i = formals->len() - 1; i >= 0; --i){
                 Symbol symName = (dynamic_cast<formal_class*>(formals->nth(i)))->name;
-                if (backupTable.find(symName) != backupTable.end()){
-                    //TODO: better restore since 2 names are on stack!
+                std::ostringstream strm;
+                strm << "_hidden_" << symName;
+                Symbol hidName = stringtable.add_string(strdup(strm.str().c_str()));
+
+                if (g_varTable.find(hidName) != g_varTable.end()){
                     s << "\t# >>> name: " <<  symName << " addr restored now!" << endl;
-                    g_varTable[symName] = backupTable[symName];
 
+                    g_varTable[symName] = g_varTable[hidName];
                     if (i > 2){
-                        //load and restore address value into t1 and save into location
-                        std::ostringstream strm;
-                        strm << "_hidden_" << symName;
-                        Symbol hidden_name = stringtable.lookup_string(const_cast<char*>(strm.str().c_str()));
-                        RegAddrInfo& info = g_varTable[hidden_name]; //must on stack
-                        emit_load(T1, -1 * info.offset, FP, s);
-                        save_reg_in_symbol_location(T1, symName, s);
-
-                        //erase hidden_name
-                        free_symbol_location(hidden_name, s);
-                        g_varTable.erase(hidden_name);
-                    }else{
-                        //will restore to registers
+                        free_symbol_location(symName, s);
                     }
+                    g_varTable.erase(hidName);
                 }else{
                     s << "\t# >>> name: " <<  symName << " out of scope now!" << endl;
                     if (i > 2){
                         s << "\t#@ " << name << ": used stack space rewinding for " << symName << endl;
                         emit_addiu(SP, SP, 4, s);
                         g_current_sp_offset--;
-                        g_varTable.erase(symName);
                     }
+                    g_varTable.erase(symName);
                 }
             }
 
@@ -1728,15 +1717,14 @@ namespace{
                 Symbol hidSym = stringtable.lookup_string(const_cast<char*>(hidName.c_str()));
                 Symbol vSym = stringtable.lookup_string(const_cast<char*>(vnamestr.c_str()));
                 if (g_varTable.find(hidSym) != g_varTable.end()){
-                    s << "\t# >>> value of name: " <<  vSym << " restored now!" << endl;
+                    s << "\t# >>> value of name: " <<  vSym << " restored now, new space freed now!" << endl;
                     //restore
+                    free_symbol_location(vSym, s);
                     g_varTable[vSym] = g_varTable[hidSym];
-
-                    //erase hidden_name
-                    free_symbol_location(hidSym, s);
                     g_varTable.erase(hidSym);
                 }else{
                     //erase
+                    //stack space needs to be freed
                     s << "\t# >>> value of name: " <<  vSym << " space freed now!" << endl;
                     free_symbol_location(vSym, s);
                     g_varTable.erase(vSym);
