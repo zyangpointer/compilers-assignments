@@ -667,7 +667,8 @@ Object.type_name:
 # IO.out_string
 #
 #	Prints out the contents of a string object argument
-#	which is on top of the stack.
+#	-- which is on top of the stack.
+#	from a1
 #
 #	$a0 is preserved!
 #
@@ -676,12 +677,13 @@ Object.type_name:
 IO.out_string:
 	addiu	$sp $sp -4
 	sw	$a0 4($sp)	# save self
-	lw	$a0 8($sp)	# get arg
-	addiu	$a0 $a0 str_field	# Adjust to beginning of str
+	#lw	$a0 8($sp)	# get arg --- arg in a1
+	addiu	$a0 $a1 str_field	# Adjust to beginning of str
 	li	$v0 4		# print_str
 	syscall
 	lw	$a0 4($sp)	# return self
-	addiu	$sp $sp 8	# pop argument
+	#addiu	$sp $sp 8	# pop argument
+	addiu	$sp $sp 4	# Modify! pop argument
 	jr	$ra
 
 #

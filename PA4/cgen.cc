@@ -810,6 +810,10 @@ void CgenClassTable::install_class(CgenNodeP nd)
   // and the symbol table.
   nds = new List<CgenNode>(nd,nds);
   addid(name,nd);
+
+  if (cgen_debug){
+      cout << "### Install class " << name << ", addr = " << nd << endl;
+  }
 }
 
 void CgenClassTable::install_classes(Classes cs)
@@ -1835,20 +1839,40 @@ void typcase_class::code(ostream &s) {
     //select the cloest branch
     int case_branch = -1;
     branch_class* branch = NULL;
-    CgenNode* clsPtr = g_clsTablePtr->lookup(expr->get_type());
-    while(case_branch == -1){
+    CgenNode* expClsPtr = g_clsTablePtr->lookup(expr->get_type());
+
+    //Try every branch
+    if (expClsPtr){
         for (int i = cases->first(); cases->more(i); i = cases->next(i)){
             branch = dynamic_cast<branch_class*>(cases->nth(i));
-            if (clsPtr->name == branch->type_decl){
-                case_branch = i;
+            assert(branch);
+            //cout << "### checking with branch " << i << endl;
+            CgenNode* clsPtr = expClsPtr;
+
+            do{
+                //cout << "### checking class name " << clsPtr->name << " with "
+                //    << branch->type_decl << endl;
+                if (clsPtr->name == branch->type_decl){
+                    case_branch = i; //found now
+                    break;
+                }else{
+                    clsPtr = clsPtr->get_parentnd();
+                }
+            }while (clsPtr->name != No_class);
+
+            if (case_branch != -1){
+                break;
             }
         }
-
-        if (case_branch == -1){
-            clsPtr = clsPtr->get_parentnd();
-        }
     }
-    
+
+    if (case_branch == -1){
+        if (cgen_debug){
+            cout << "!!!!!!! Un-matched branch!" << endl;
+        }
+        emit_jal("_case_abort", s);
+    }   
+
     //allocate new location with value from T1
     new_location_for_symbol(branch->name, T1, s);
     branch->expr->code(s);
