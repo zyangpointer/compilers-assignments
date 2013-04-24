@@ -1526,12 +1526,12 @@ namespace{
         s << "\t#@ dispatch " << name << ": save arg registers..." << endl;
         g_current_sp_offset += 1 + numOfArgRegs;
 
+        //1. Save $s0/a1/a2/a3 for restore
+        emit_store(SELF, 0, SP, s);
         emit_addiu(SP, SP, -4 - 4 * numOfArgRegs, s);
-
         for (int i = 0; i < numOfArgRegs; ++i){
-            s << SW << "$a" << (i + 1) << " " << 4*(numOfArgRegs + 1 - i) << "($sp)" << endl;
+            s << SW << "$a" << (i + 1) << " " << 4*(numOfArgRegs - i) << "($sp)" << endl;
         }
-        emit_store(SELF, 1, SP, s);
 
         s << "\t#@ evaluate actual parameters and save into registers/stack" << endl;
         CgenNodeP classPtr = g_clsTablePtr->lookup(obj_type);
@@ -1561,6 +1561,7 @@ namespace{
         VarAddrTable backupTable;
         //formal parameter generation and save into stack/registers
         if (numOfArgs > 0){
+            //2. Valule objects / hidName push to stack
             //evaluate argument expressions and save value object to stack
             for (int i = 0; i < numOfArgs; ++i){
                 //A hidden location on the stack is used to save the value of arguments
@@ -1587,10 +1588,9 @@ namespace{
                 s << "\t#<<< " << name << " argument value:" <<  strm.str()
                     << " saved to FP offset " << g_current_sp_offset << endl;
                 new_location_for_symbol(vName, ACC, s);
-
             }
 
-            //allocate locations in cases of name conflicts
+            //3. Formal name objects intended for stack name handling - save old name if needed
             for (int i = 0; i < numOfArgs; ++i){
                 //Find appropriate location for formal name
                 //check for name conflicts
@@ -1601,7 +1601,7 @@ namespace{
                     //save old address info since the place would be overwritten???
                     s << "\t# <<< old name " << formal->name << " added to backup store" << endl;
                     backupTable[formal->name] = g_varTable[formal->name];
-                    if (i > 3){
+                    if (i > 2){
                         //address will be overritten on stack!
                         RegAddrInfo& info = g_varTable[formal->name];
                         assert(info.location == LOC_FP);
@@ -1617,22 +1617,27 @@ namespace{
                 }
             }
 
+            //4. Update name location, allocate new space from stack
             size_t last_arg_offset = g_current_sp_offset;
             g_current_sp_offset += ((numOfArgs > 3) ? numOfArgs : 0);
-
-            //save value to formal locations
+            s << "\t# <<< " << name << " - allocate " << (g_current_sp_offset - last_arg_offset) 
+              << " more space for formal names " << endl; 
             for (int i = 0; i < numOfArgs; ++i){
                 formal_class* formal = dynamic_cast<formal_class*>(formals->nth(i));
                 //Update formal name address info 
                 RegAddrInfo& info = g_varTable[formal->name];
                 if (i < 3){
                     //save result from acc to registers a1/a2/a3
+                    s << "\t# <<< " << name << " - arg " << formal->name << " saved to $a " 
+                      << (i + 1) << endl;
                     info.location = LOC_ARG;
                     info.offset = (i+1);
                 }else{
                     //save in stack, but won't be popped out until done 
                     // parameters shall be pushed in reverse order
-                    info.location = LOC_FP;
+                    s << "\t# <<< " << name << " - arg " << formal->name << " saved to offset " 
+                      << info.offset << endl;
+                    info.location = LOC_ARG;
                     info.offset = last_arg_offset + numOfArgs - 1 - i;
                 }
 
@@ -1646,7 +1651,7 @@ namespace{
             }
         }
 
-        //set new a0 since self can only change here!
+        //5. set new s0 since self can only change here!
         s << "\t#<<< " << name << " - evaluate and set new $s0 ..." << endl;
         expr->code(s);
         emit_move(SELF, ACC, s);
@@ -1669,21 +1674,23 @@ namespace{
         emit_load(T1, method_offset, T1, s);
         emit_jalr(T1, s);
 
-        //Restore and pop order
-        // 1. Pop hidden objects and erase/restore names
+        //Restore and pop in reverse order
+        // 1. Pop hidden formal name objects and erase/restore formal names
         // 2. Pop value objects and erase/restore names
-        // 3. Pop restore s0
-        // 4. Pop and restore registers
+        // 3. Pop restore a1/a2/a3
+        // 4. Pop restore s0
         s<< "\t#<<< " << name << " done, pop hidden objects and value objects..." << endl;
         if (formals->len() > 0){
-            //Pop hidden
+            // 1. Pop hidden objects and erase/restore names
+            size_t garbage_space = 0;
             for (int i = formals->len() - 1; i >= 0; --i){
                 Symbol symName = (dynamic_cast<formal_class*>(formals->nth(i)))->name;
                 if (backupTable.find(symName) != backupTable.end()){
+                    //TODO: better restore since 2 names are on stack!
                     s << "\t# >>> name: " <<  symName << " addr restored now!" << endl;
                     g_varTable[symName] = backupTable[symName];
 
-                    if (i > 3){
+                    if (i > 2){
                         //load and restore address value into t1 and save into location
                         std::ostringstream strm;
                         strm << "_hidden_" << symName;
@@ -1700,11 +1707,16 @@ namespace{
                     }
                 }else{
                     s << "\t# >>> name: " <<  symName << " out of scope now!" << endl;
-                    g_varTable.erase(symName);
+                    if (i > 2){
+                        s << "\t#@ " << name << ": used stack space rewinding for " << symName << endl;
+                        emit_addiu(SP, SP, 4, s);
+                        g_current_sp_offset--;
+                        g_varTable.erase(symName);
+                    }
                 }
             }
 
-            //Erase/restore value objects in the reverse order
+            // 2. Pop value objects and erase/restore names
             for (int i = numOfArgs - 1; i >= 0; --i){
                 Symbol symName = (dynamic_cast<formal_class*>(formals->nth(i)))->name;
 
@@ -1732,21 +1744,16 @@ namespace{
             }
         }
 
-        s<< "\t#<<< " << name << " done, restore $a0 and registers ..." << endl;
+        // 3. Pop restore a3/a2/a1
+        s<< "\t#<<< " << name << " done, num of reg args = " << numOfArgRegs 
+            << ", restore a3/a2/a1 and $s0 ..." << endl;
         for (int i = 0; i < numOfArgRegs; ++i){
-            s << LW << "$a" << (i+1) << " " << (numOfArgRegs + 1 - i)*4 << "($sp)" << endl;
+            s << LW << "$a" << (i+1) << " " << (numOfArgRegs - i)*4 << "($sp)" << endl;
         }
-        emit_load(SELF, 1, SP, s);
+        emit_load(SELF, (numOfArgRegs + 1), SP, s);
 
         emit_addiu(SP, SP, (numOfArgRegs + 1) * 4, s);
         g_current_sp_offset -= (1+numOfArgs);
-
-        //restore allocated names for extra arguments
-        if (formals->len() > 3){
-            s << "\t#@ " << name << ": used stack space rewinding for formal parameters..." << endl;
-            emit_addiu(SP, SP, (formals->len() - 3) * 4, s);
-        }
-
         s << "\t#@ After dispatch " << name << ": stack_offset is:" << g_current_sp_offset << endl;
     }
 }
