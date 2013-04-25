@@ -851,7 +851,8 @@ String.length:
 #   to the new object.
 #
 #	INPUT:	$a0: the first string object (self)
-#		Top of stack: the second string object (arg1)
+#   ----		Top of stack: the second string object (arg1)
+#		$a1: the second string object (arg1)
 #
 #	OUTPUT:	$a0 the new string object
 #
@@ -872,8 +873,9 @@ String.concat:
 	jal     _quick_copy			# Call copy
 	sw	$a0 8($sp)			# save new size object
 
-	lw	$t1 20($sp)			# load arg object
-	lw	$t1 str_size($t1)		# get size object
+	# lw	$t1 20($sp)			# load arg object
+	# lw	$t1 str_size($t1)		# get size object
+	lw	$t1 str_size($a1)		# get size object
 	lw	$t1 int_slot($t1)		# arg string size
 	blez	$t1 _strcat_argempty		# nothing to add
 	lw	$t0 12($sp)			# load self object
@@ -940,8 +942,9 @@ _strcat_argempty:
 #		Offset starts at 0.
 #
 #	INPUT:	$a0 the string
-#		length int object on top of stack (-4)
-#		index int object below length on stack (-8)
+#   ---		length int object on top of stack (-4)
+#   ---		index int object below length on stack (-8)
+#           $a1 : index, $a2: length
 #	OUTPUT:	The substring object in $a0
 #
 
@@ -974,9 +977,15 @@ _ss_ok:
 	jal	String_init	# new obj ptr in $a0
 	move	$a2 $a0		# use a2 to make copy
 	addiu	$gp $gp -4	# backup alloc ptr
-	lw	$a1 12($sp)	# load orig
-	lw	$t1 20($sp)	# index obj
-	lw	$t2 16($sp)	# length obj
+
+    move $t1 $a1  # index obj in a1
+    move $t2 $a2  # length obj in a2
+    lw $a1 12($sp) # orig object
+
+	#lw	$a1 12($sp)	# load orig
+	#lw	$t1 20($sp)	# index obj
+	#lw	$t2 16($sp)	# length obj
+    
 	lw	$t0 str_size($a1)
 	lw	$v1 int_slot($t1) # index
 	lw	$v0 int_slot($t0) # size of orig
