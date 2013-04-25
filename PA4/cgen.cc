@@ -1771,32 +1771,26 @@ void dispatch_class::code(ostream &s) {
 }
 
 void cond_class::code(ostream &s) {
-    //TODO: check cond_class
     s << "\t# if_stmt begin...." << endl;
     pred->code(s);
-    //emit_save_temp_registers(s);
-    emit_move(T1, ACC, s);
-    emit_load(T1, first_attr_offset, T1, s);
+    emit_load(ACC, first_attr_offset, ACC, s);
 
     int true_label = next_lable_id++;
     int false_label = next_lable_id++;
-    emit_bne(T1, ZERO, true_label, s);
+    emit_bne(ACC, ZERO, true_label, s);
     emit_branch(false_label, s);
 
     int joint_label = next_lable_id++;
     s << "\t# <<< Truth label = " << true_label << ", false label = " << false_label << endl;
     emit_label_def(true_label,s);
     then_exp->code(s);
-    emit_move(T1, ACC, s);
     emit_branch(joint_label, s);
 
     emit_label_def(false_label, s);
     else_exp->code(s);
-    emit_move(T1, ACC, s);
     emit_branch(joint_label, s);
 
     emit_label_def(joint_label, s);
-    emit_move(ACC, T1, s);
     s << "\t# if_stmt end...." << endl;
 }
 
@@ -1902,7 +1896,8 @@ void let_class::code(ostream &s) {
         if (cgen_debug)
             cout << "<<< let statement, init type:" << (init->get_type() ? init->get_type() : No_type) << endl;
         if (type_decl == Int){
-            emit_load_int(ACC, 0, s);
+            IntEntry* entry = inttable.lookup_string("0");
+            emit_load_int(ACC, entry, s);
         }else if (type_decl == Bool){
             emit_load_bool(ACC, falsebool, s);
         }else if (type_decl == Str){
@@ -1929,15 +1924,19 @@ void let_class::code(ostream &s) {
     e1->code(s);\
     emit_jal("Object.copy", s);\
     emit_push(ACC, s);\
-    s << "\t#>> evaluate e2 to $t2" << endl;\
+    g_current_sp_offset++; \
+    \
+    s << "\t#>> " << name << " evaluating e2 ..." << endl;\
     e2->code(s);\
+    s << "\t#>> " << name << " restore e1 to $t1 and do $t1 + $t2" << endl;\
     emit_move(T2, ACC, s);\
     emit_load(T2, first_attr_offset, T2, s);\
-    s << "\t#>> restore e1 to $t1 and do $t1 + $t2" << endl;\
+    \
     emit_pop(ACC, s);\
+    g_current_sp_offset--;\
     emit_load(T1, first_attr_offset, ACC, s); \
     com(T1, T1, T2, s);\
-    s << "\t#>> store value to $a0 for return" << endl;\
+    s << "\t#>> " << name << " store value to $a0 for return" << endl;\
     emit_store(T1, first_attr_offset, ACC, s);\
     s << "\t#" << name << " end!" << endl;
     
@@ -1958,14 +1957,14 @@ void divide_class::code(ostream &s) {
 }
 
 void neg_class::code(ostream &s) {
-    s << "\t@@@ << Neg begin..." << endl;
+    s << "\t#@@@ << Neg begin..." << endl;
     e1->code(s);
     emit_jal("Object.copy", s);
     emit_load(T1, first_attr_offset, ACC, s);
     emit_load_imm(V0, -1, s);
     emit_mul(T1, T1, V0, s);
     emit_store(T1, first_attr_offset, ACC, s);
-    s << "\t@@@ << Neg end..." << endl;
+    s << "\t#@@@ << Neg end..." << endl;
 }
 
 
