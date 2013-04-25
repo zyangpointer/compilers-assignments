@@ -1806,21 +1806,25 @@ void loop_class::code(ostream &s) {
     int begin_label = next_lable_id++;
     emit_label_def(begin_label, s);
 
+    s << "\t# Loop begin..." << endl;
     pred->code(s);
     emit_move(T1, ACC, s);
     emit_load(T1, first_attr_offset, T1, s);
     
+    s << "\t# <<< checking branches..." << endl;
     int true_label = next_lable_id++;
     int false_label = next_lable_id++;
     emit_bne(T1, ZERO, true_label, s);
     emit_branch(false_label, s);
 
     emit_label_def(true_label, s);
+    s << "\t# <<< loop body branches..." << endl;
     body->code(s);
     emit_branch(begin_label, s);
 
     //do nothing for false
     emit_label_def(false_label, s);
+    s << "\t# <<< false branch do nothing..." << endl;
     //emit_restore_temp_registers(s);
 }
 
@@ -1921,17 +1925,17 @@ void let_class::code(ostream &s) {
 
 
 #define __GEN_ARITH_CODE__(name, com) \
-    s << "\t#" << name << " begin: evaluate t1 -> $a0 and push to stack" << endl;\
+    s << "\t#" << name << " begin: evaluate e1 to $a0, copy and push to stack" << endl;\
     e1->code(s);\
     emit_jal("Object.copy", s);\
     emit_push(ACC, s);\
     s << "\t#>> evaluate e2 to $t2" << endl;\
     e2->code(s);\
     emit_move(T2, ACC, s);\
+    emit_load(T2, first_attr_offset, T2, s);\
     s << "\t#>> restore e1 to $t1 and do $t1 + $t2" << endl;\
     emit_pop(ACC, s);\
     emit_load(T1, first_attr_offset, ACC, s); \
-    emit_load(T2, first_attr_offset, T2, s);\
     com(T1, T1, T2, s);\
     s << "\t#>> store value to $a0 for return" << endl;\
     emit_store(T1, first_attr_offset, ACC, s);\
@@ -1966,30 +1970,31 @@ void neg_class::code(ostream &s) {
 
 
 #define __GEN_COMP_CODE(name, comp)   \
-    s << "#" << name << " Begin..." << endl;\
+    s << "\t#" << name << " Begin..." << endl;\
     e1->code(s);\
-    s << "# << save t1&t2..." << endl;\
-    emit_addiu(SP, SP, -8, s);\
-    emit_store(T1, 2, SP, s);\
-    emit_store(T2, 1, SP, s);\
     emit_load(T1, first_attr_offset, ACC, s);\
+    emit_addiu(SP, SP, -4, s);\
+    emit_store(T1, 1, SP, s);\
+    g_current_sp_offset++; \
     e2->code(s);\
+    emit_pop(T1, s); \
+    g_current_sp_offset--; \
     emit_load(T2, first_attr_offset, ACC, s);\
     int true_label = next_lable_id++;\
     int false_label = next_lable_id++;\
     int joint_label = next_lable_id++;\
-    comp(T1, ACC, true_label, s);\
-    emit_label_def(true_label, s);\
-    emit_load_bool(ACC, truebool, s);\
-    emit_branch(joint_label, s);\
+    comp(T1, T2, true_label, s);\
+    \
     emit_label_def(false_label, s);\
     emit_load_bool(ACC, falsebool, s);\
     emit_branch(joint_label, s);\
+    \
+    emit_label_def(true_label, s);\
+    emit_load_bool(ACC, truebool, s);\
+    emit_branch(joint_label, s);\
+    \
     emit_label_def(joint_label, s);\
-    emit_load(T1, 1, SP, s);\
-    emit_load(T2, 2, SP, s);\
-    emit_addiu(SP, SP, 8, s);\
-    s << "#" << name << " end..." << endl;
+    s << "\t#" << name << " end..." << endl;
 
 void lt_class::code(ostream &s) {
     __GEN_COMP_CODE("LT", emit_blt);
@@ -2058,13 +2063,11 @@ void leq_class::code(ostream &s) {
 void comp_class::code(ostream &s) {
     s << "\t#@@@ Not begin..." << endl;
     e1->code(s);
-    //emit_save_temp_registers(s);
+    emit_jal("Object.copy", s);
     emit_load(T1, first_attr_offset, ACC, s);
     emit_load_imm(T2, 1, s);
     emit_sub(T1, T2, T1, s); //1->0, 0->1
     emit_store(T1, first_attr_offset, ACC, s);
-
-    //emit_restore_temp_registers(s);
     s << "\t#@@@ Not end..." << endl;
 }
 
