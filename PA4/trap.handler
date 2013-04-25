@@ -852,7 +852,7 @@ String.length:
 #
 #	INPUT:	$a0: the first string object (self)
 #   ----		Top of stack: the second string object (arg1)
-#		$a1: the second string object (arg1)
+#		$a1: the second string object (arg1) , move to a3 to avoid conflict
 #
 #	OUTPUT:	$a0 the new string object
 #
@@ -866,17 +866,22 @@ String.concat:
 	sw	$0 8($sp)			# init GC area
 	sw	$0 4($sp)			# init GC area
 
+    move $a3 $a1
+
 	jal	_MemMgr_Test			# test GC area
 
 	lw	$a0 12($sp)
 	lw	$a0 str_size($a0)
+
 	jal     _quick_copy			# Call copy
+
 	sw	$a0 8($sp)			# save new size object
 
 	# lw	$t1 20($sp)			# load arg object
 	# lw	$t1 str_size($t1)		# get size object
-	lw	$t1 str_size($a1)		# get size object
+	lw	$t1 str_size($a3)		# get size object
 	lw	$t1 int_slot($t1)		# arg string size
+
 	blez	$t1 _strcat_argempty		# nothing to add
 	lw	$t0 12($sp)			# load self object
 	lw	$t0 str_size($t0)		# get size object
@@ -894,7 +899,9 @@ String.concat:
 	jal	_MemMgr_QAlloc			# check memory
 
 	lw	$a0 12($sp)			# copy self
-	jal	_quick_copy			# Call copy
+    
+	jal     _quick_copy			# Call copy
+
 	lw	$t0 8($sp)			# get the Int object
 	sw	$t0 str_size($a0)		# store it in the str obj.
 
@@ -911,7 +918,10 @@ String.concat:
 	lw	$t0 int_slot($t0)		# self string size
 	addiu	$t1 $a0 str_field		# points to start of string data
 	addu	$t1 $t1 $t0			# points to end: '\0'
-	lw	$t0 20($sp)			# load arg object
+
+	#lw	$t0 20($sp)			# load arg object
+    move $t0 $a3
+    
 	addiu	$t2 $t0 str_field		# points to start of arg data
 	lw	$t0 str_size($t0)		# get arg size
 	lw	$t0 int_slot($t0)
@@ -926,13 +936,15 @@ _strcat_copy:
 	sb	$0 0($t1)			# add '\0'
 
 	lw	$ra 16($sp)			# restore return address
-	addiu	$sp $sp 20			# pop argument
+	#addiu	$sp $sp 20			# pop argument
+	addiu	$sp $sp 16			# pop argument
 	jr	$ra				# return
 
 _strcat_argempty:
 	lw	$a0 12($sp)			# load original self
 	lw	$ra 16($sp)			# restore return address
-	addiu	$sp $sp 20			# pop argument
+	#addiu	$sp $sp 20			# pop argument
+	addiu	$sp $sp 16			# pop argument
 	jr	$ra				# return
 
 #
@@ -944,7 +956,7 @@ _strcat_argempty:
 #	INPUT:	$a0 the string
 #   ---		length int object on top of stack (-4)
 #   ---		index int object below length on stack (-8)
-#           $a1 : index, $a2: length
+#           $a1 : index, $a2: length -> map to a3/t5 to avoid conflict
 #	OUTPUT:	The substring object in $a0
 #
 
@@ -954,6 +966,9 @@ String.substr:
 	sw	$ra 4($sp)		# save return
 	sw	$a0 12($sp)		# save self
 	sw	$0 8($sp)		# init GC area
+
+    move $a3 $a1
+    move $t5 $a2
 
 	jal	_MemMgr_Test		# test GC area
 
@@ -978,8 +993,8 @@ _ss_ok:
 	move	$a2 $a0		# use a2 to make copy
 	addiu	$gp $gp -4	# backup alloc ptr
 
-    move $t1 $a1  # index obj in a1
-    move $t2 $a2  # length obj in a2
+    move $t1 $a3  # index obj in a1
+    move $t2 $t5  # length obj in a2
     lw $a1 12($sp) # orig object
 
 	#lw	$a1 12($sp)	# load orig
@@ -1022,7 +1037,8 @@ _ss_end:
 	sw	$t0 obj_size($a0)
 
 	lw	$ra 4($sp)
-	addiu	$sp $sp 20	# pop arguments
+	#addiu	$sp $sp 20	# pop arguments
+	addiu	$sp $sp 12	# pop arguments
 	jr	$ra
 
 _ss_abort1:
