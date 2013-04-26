@@ -1845,10 +1845,15 @@ void typcase_class::code(ostream &s) {
     emit_jal("_case_abort2", s);
 
     emit_label_def(next_lable_id++, s);
-    //select the cloest branch
+    //select the cloest branch in class hierachy
+    //TODO: get real type???
     int case_branch = -1;
     branch_class* branch = NULL;
     CgenNode* expClsPtr = g_clsTablePtr->lookup(expr->get_type());
+
+    if (cgen_debug){
+        cout << "###### case expression type:" << expr->get_type() << endl;
+    }
 
     //Try every branch
     if (expClsPtr){
@@ -1859,8 +1864,8 @@ void typcase_class::code(ostream &s) {
             CgenNode* clsPtr = expClsPtr;
 
             do{
-                //cout << "### checking class name " << clsPtr->name << " with "
-                //    << branch->type_decl << endl;
+                cout << "### checking class name " << clsPtr->name << " with "
+                    << branch->type_decl << endl;
                 if (clsPtr->name == branch->type_decl){
                     case_branch = i; //found now
                     break;
