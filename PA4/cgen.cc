@@ -1654,8 +1654,18 @@ namespace{
 
         //5. set new s0 since self can only change here!
         s << "\t#<<< " << name << " - evaluate and set new $s0 ..." << endl;
+        emit_addiu(SP, SP, -12, s);
+        emit_store(A1, 3, SP, s);
+        emit_store(A2, 2, SP, s);
+        emit_store(A3, 1, SP, s);
+        g_current_sp_offset += 3;
         expr->code(s);
         emit_move(SELF, ACC, s);
+        emit_load(A1, 3, SP, s);
+        emit_load(A2, 2, SP, s);
+        emit_load(A3, 1, SP, s);
+        emit_addiu(SP, SP, 12, s);
+        g_current_sp_offset -= 3;
 
         s << "\t#<<< " << name << " - do the call ..." << endl;
         //call function
