@@ -1671,7 +1671,8 @@ namespace{
         emit_jal("_dispatch_abort", s);
 
         emit_label_def(dispatch_call, s);
-        emit_load(T1, 2, SELF, s); // offset 2 = dispTab
+        //Locate the actual type's protObj dispTab
+        s << LA << T1 << " " << clsPtr->name << DISPTAB_SUFFIX << endl;
         emit_load(T1, method_offset, T1, s);
         emit_jalr(T1, s);
 
@@ -2090,12 +2091,16 @@ void bool_const_class::code(ostream& s)
 
 
 void new__class::code(ostream &s) {
-    s << "\t#<<< new object begin " << endl;
+    s << "\t#<<< new object begin :" << type_name << endl;
     CgenNode* clsPtr = g_clsTablePtr->lookup(type_name);
+    if (type_name == SELF_TYPE){
+        clsPtr = g_clsTablePtr->lookup(self);
+    }
+
     emit_partial_load_address(ACC, s);
     s << clsPtr->name << PROTOBJ_SUFFIX << endl;
     emit_jal("Object.copy", s);
-    s << JAL << type_name << CLASSINIT_SUFFIX << endl;
+    s << JAL << clsPtr->name << CLASSINIT_SUFFIX << endl;
     s << "\t#>>> new object end " << endl;
 }
 
