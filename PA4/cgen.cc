@@ -1530,7 +1530,7 @@ namespace{
         s << "\t#@ dispatch " << name << ": save arg registers..." << endl;
         g_current_sp_offset += 1 + numOfArgRegs;
 
-        //1. Save $s0/a1/a2/a3 for restore
+        //1. Save parent's $s0/a1/a2/a3 for restore
         emit_store(SELF, 0, SP, s);
         emit_addiu(SP, SP, -4 - 4 * numOfArgRegs, s);
         for (int i = 0; i < numOfArgRegs; ++i){
@@ -1846,7 +1846,7 @@ void typcase_class::code(ostream &s) {
 
     emit_label_def(next_lable_id++, s);
     //select the cloest branch in class hierachy
-    //TODO: get real type???
+    //TODO: need to store runtime inheritance hierachy info 
     int case_branch = -1;
     branch_class* branch = NULL;
     CgenNode* expClsPtr = g_clsTablePtr->lookup(expr->get_type());
