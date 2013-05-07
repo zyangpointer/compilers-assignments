@@ -845,21 +845,45 @@ void CgenClassTable::set_relations(CgenNodeP nd)
 }
 
 void CgenClassTable::build_class_tags(){
-    m_tagIdList.push_back(std::make_pair(Object, objectclasstag));
-    m_tagIdList.push_back(std::make_pair(IO, ioclasstag));
-    m_tagIdList.push_back(std::make_pair(Int, intclasstag));
-    m_tagIdList.push_back(std::make_pair(Bool, boolclasstag));
-    m_tagIdList.push_back(std::make_pair(Str, stringclasstag));
+    //m_tagIdList.push_back(std::make_pair(Object, objectclasstag));
+    //m_tagIdList.push_back(std::make_pair(IO, ioclasstag));
+    //m_tagIdList.push_back(std::make_pair(Int, intclasstag));
+    //m_tagIdList.push_back(std::make_pair(Bool, boolclasstag));
+    //m_tagIdList.push_back(std::make_pair(Str, stringclasstag));
 
-    size_t tag = stringclasstag + 1;    
-    //class tags start with stringclasstag + 1
+    size_t tag = objectclasstag;    
+    //class tags start with stringclasstag + 1 and basic classes will be skipped
     for(List<CgenNode> *l = nds; l; l = l->tl()){
         CgenNode* node = l->hd();
-        if (!(node->basic())){
-            m_tagIdList.push_back(std::make_pair(node->name, tag++)); 
+        if (node->get_name() == Object){
+            //from root node - Object
+            assign_tags(node, tag);
+            break;
         }
     }
 }
+   
+void CgenClassTable::assign_tags(CgenNode* node, size_t& curId){
+    m_tagIdList.push_back(std::make_pair(node->get_name(), curId));
+    if (node->basic()){
+        if (node->get_name() == Object)
+            objectclasstag = curId;
+        else if (node->get_name() == IO)
+            ioclasstag = curId;
+        else if (node->get_name() == Str)
+            stringclasstag = curId;
+        else if (node->get_name() == Bool)
+            boolclasstag = curId;
+        else if (node->get_name() == Int)
+            intclasstag = curId;
+    }
+    
+    for(List<CgenNode> *l = node->get_children(); l; l = l->tl()){
+        CgenNode* child = l->hd();
+        assign_tags(child, ++curId);
+    }
+}
+
 
 void CgenNode::add_child(CgenNodeP n)
 {
@@ -1833,6 +1857,13 @@ void loop_class::code(ostream &s) {
     //emit_restore_temp_registers(s);
 }
 
+
+namespace{
+    bool if_not_in_list(CgenNode* v, const AncestorList& list){
+        return std::find(list.begin(), list.end(), v) == list.end();
+    }
+}
+
 void typcase_class::code(ostream &s) {
     s << "\t#$$ typecase begin..." << endl;
 
@@ -1846,40 +1877,41 @@ void typcase_class::code(ostream &s) {
 
     emit_label_def(next_lable_id++, s);
     //select the cloest branch in class hierachy
-    //TODO: need to store runtime inheritance hierachy info 
-    int case_branch = -1;
     branch_class* branch = NULL;
     CgenNode* expClsPtr = g_clsTablePtr->lookup(expr->get_type());
 
-    if (cgen_debug){
-        cout << "###### case expression type:" << expr->get_type() << endl;
+    //Prepare branch tags
+    std::map<Symbol, int> branchTags;
+    AncestorList options;
+    for (int i = cases->first(); cases->more(i); i = cases->next(i)){
+        branch = dynamic_cast<branch_class*>(cases->nth(i));
+        branchTags[branch->type_decl] = next_lable_id++;
+        options.push_back(g_clsTablePtr->lookup(branch->type_decl));
     }
 
-    //Try every branch
-    if (expClsPtr){
-        for (int i = cases->first(); cases->more(i); i = cases->next(i)){
-            branch = dynamic_cast<branch_class*>(cases->nth(i));
-            assert(branch);
-            //cout << "### checking with branch " << i << endl;
-            CgenNode* clsPtr = expClsPtr;
+    //ancestor chain is sorted from top to bottom, so reverse it first
+    AncestorList chains = expClsPtr->get_ancestors();
+    std::reverse(chains.begin(), chains.end());
+    AncestorList candidates;
+    std::remove_copy_if(chains.begin(), chains.end(), std::back_inserter(candidates),
+            std::tr1::bind(if_not_in_list, std::tr1::placeholders::_1, options));
 
-            do{
-                cout << "### checking class name " << clsPtr->name << " with "
-                    << branch->type_decl << endl;
-                if (clsPtr->name == branch->type_decl){
-                    case_branch = i; //found now
-                    break;
-                }else{
-                    clsPtr = clsPtr->get_parentnd();
-                }
-            }while (clsPtr->name != No_class);
+    //TODO:compare tag id with candidate list
+    emit_load(T2, 0, ACC, s);
+    int case_branch = 0;
 
-            if (case_branch != -1){
-                break;
-            }
-        }
+    //Here's the branch definitions
+    for (int i = cases->first(); cases->more(i); i = cases->next(i)){
+        branch = dynamic_cast<branch_class*>(cases->nth(i));
+        int cur_label = branchTags[branch->type_decl];
+
+        emit_label_def(cur_label, s);
+        new_location_for_symbol(branch->name, T1, s);
+        branch->expr->code(s);
+        free_symbol_location(branch->name, s);
     }
 
+    //TODO:revise this!
     if (case_branch == -1){
         if (cgen_debug){
             cout << "!!!!!!! Un-matched branch!" << endl;
@@ -1887,10 +1919,6 @@ void typcase_class::code(ostream &s) {
         emit_jal("_case_abort", s);
     }   
 
-    //allocate new location with value from T1
-    new_location_for_symbol(branch->name, T1, s);
-    branch->expr->code(s);
-    free_symbol_location(branch->name, s);
 
     s << "\t#$$ typecase end..." << endl;
 }

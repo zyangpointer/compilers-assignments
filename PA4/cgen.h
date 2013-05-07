@@ -40,6 +40,7 @@ private:
    void code_constants();
 
    void build_class_tags();
+   void assign_tags(CgenNode* node, size_t& curId);
 
    void code_class_nameTab();
    void code_class_objTab();
