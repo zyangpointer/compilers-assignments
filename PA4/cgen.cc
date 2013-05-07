@@ -845,12 +845,6 @@ void CgenClassTable::set_relations(CgenNodeP nd)
 }
 
 void CgenClassTable::build_class_tags(){
-    //m_tagIdList.push_back(std::make_pair(Object, objectclasstag));
-    //m_tagIdList.push_back(std::make_pair(IO, ioclasstag));
-    //m_tagIdList.push_back(std::make_pair(Int, intclasstag));
-    //m_tagIdList.push_back(std::make_pair(Bool, boolclasstag));
-    //m_tagIdList.push_back(std::make_pair(Str, stringclasstag));
-
     size_t tag = objectclasstag;    
     //class tags start with stringclasstag + 1 and basic classes will be skipped
     for(List<CgenNode> *l = nds; l; l = l->tl()){
@@ -864,7 +858,10 @@ void CgenClassTable::build_class_tags(){
 }
    
 void CgenClassTable::assign_tags(CgenNode* node, size_t& curId){
-    m_tagIdList.push_back(std::make_pair(node->get_name(), curId));
+    //max child id will be updated later
+    m_tagIdList[node->get_name()] = std::make_pair(curId, curId);
+    curId++;
+
     if (node->basic()){
         if (node->get_name() == Object)
             objectclasstag = curId;
@@ -880,8 +877,9 @@ void CgenClassTable::assign_tags(CgenNode* node, size_t& curId){
     
     for(List<CgenNode> *l = node->get_children(); l; l = l->tl()){
         CgenNode* child = l->hd();
-        assign_tags(child, ++curId);
+        assign_tags(child, curId);
     }
+    m_tagIdList[node->get_name()].second = curId - 1; //max child id
 }
 
 
@@ -935,33 +933,30 @@ void CgenClassTable::code_class_nameTab(){
     str << CLASSNAMETAB << LABEL;
 
     std::ostringstream strm;
+    /*
     //builtin first by id sequences
     Symbol basics[] = {Object, IO, Int, Bool, Str};
     for (size_t i = 0; i < sizeof(basics)/sizeof(basics[0]); ++i){
-        strm.str("");strm.clear();
-        strm << basics[i];
-        if (cgen_debug) cout << "<<< checking builtin class " << strm.str() << endl; 
+    strm.str("");strm.clear();
+    strm << basics[i];
+    if (cgen_debug) cout << "<<< checking builtin class " << strm.str() << endl; 
+    StringEntryP entry = stringtable.lookup_string(const_cast<char*>(strm.str().c_str()));
+    str << "\t#class name = " << strm.str() << endl;
+    str << WORD;
+    entry->code_ref(str);
+    str << endl;
+    }
+    */
+
+    for (ClassTagTable::iterator it = m_tagIdList.begin(), itEnd = m_tagIdList.end();
+            it != itEnd; ++it){
+        strm.clear();strm.str("");
+        strm << it->first;
         StringEntryP entry = stringtable.lookup_string(const_cast<char*>(strm.str().c_str()));
         str << "\t#class name = " << strm.str() << endl;
         str << WORD;
         entry->code_ref(str);
         str << endl;
-    }
-
-    //self-defined classes
-    for (size_t tagId = stringclasstag + 1; tagId < m_tagIdList.size(); ++tagId){
-        for (ClassTagTable::iterator it = m_tagIdList.begin(), itEnd = m_tagIdList.end();
-                it != itEnd; ++it){
-            if (it->second == tagId){
-                strm.clear();strm.str("");
-                strm << it->first;
-                StringEntryP entry = stringtable.lookup_string(const_cast<char*>(strm.str().c_str()));
-                str << "\t#class name = " << strm.str() << endl;
-                str << WORD;
-                entry->code_ref(str);
-                str << endl;
-            }
-        }
     }
 }
 
@@ -1071,7 +1066,7 @@ void CgenClassTable::code_protObjs(){
         if (it != m_tagIdList.end()){
             str << WORD << "-1" << endl 
                 << clsName << PROTOBJ_SUFFIX << LABEL
-                << WORD << it->second << endl;
+                << WORD << it->second.first << endl;
 
             //We must get all attribute list to determinze its size
             FeatureNameList feature_list = clsNodePtr->get_feature_list(false/*Fetch attributes*/);
@@ -1859,8 +1854,8 @@ void loop_class::code(ostream &s) {
 
 
 namespace{
-    bool if_not_in_list(CgenNode* v, const AncestorList& list){
-        return std::find(list.begin(), list.end(), v) == list.end();
+    bool cmp_by_tag(ClassTagTable& tagIdList, CgenNode* cls1, CgenNode* cls2){
+        return (tagIdList[cls1->get_name()].second) > (tagIdList[cls2->get_name()].second);
     }
 }
 
@@ -1881,44 +1876,38 @@ void typcase_class::code(ostream &s) {
     CgenNode* expClsPtr = g_clsTablePtr->lookup(expr->get_type());
 
     //Prepare branch tags
-    std::map<Symbol, int> branchTags;
-    AncestorList options;
+    std::map<Symbol, std::pair<int, branch_class*> > branchTags;
+    NodeList options;
     for (int i = cases->first(); cases->more(i); i = cases->next(i)){
         branch = dynamic_cast<branch_class*>(cases->nth(i));
-        branchTags[branch->type_decl] = next_lable_id++;
+        branchTags[branch->type_decl] = std::make_pair(next_lable_id++, branch);
         options.push_back(g_clsTablePtr->lookup(branch->type_decl));
     }
 
-    //ancestor chain is sorted from top to bottom, so reverse it first
-    AncestorList chains = expClsPtr->get_ancestors();
-    std::reverse(chains.begin(), chains.end());
-    AncestorList candidates;
-    std::remove_copy_if(chains.begin(), chains.end(), std::back_inserter(candidates),
-            std::tr1::bind(if_not_in_list, std::tr1::placeholders::_1, options));
+    //sorted by tag id now
+    std::sort(options.begin(), options.end(), std::tr1::bind(cmp_by_tag, g_clsTablePtr->m_tagIdList,
+            std::tr1::placeholders::_1, std::tr1::placeholders::_2));
+    for (NodeList::iterator it = options.begin(), itEnd = options.end();
+            it != itEnd; ++it){
+        Symbol type_decl = (*it)->get_name();
+        int label_id = branchTags[type_decl].first;
+        branch_class* branch = branchTags[type_decl].second;
+        TagIdInfo& tagId = g_clsTablePtr->m_tagIdList[type_decl];
 
-    //TODO:compare tag id with candidate list
-    emit_load(T2, 0, ACC, s);
-    int case_branch = 0;
-
-    //Here's the branch definitions
-    for (int i = cases->first(); cases->more(i); i = cases->next(i)){
-        branch = dynamic_cast<branch_class*>(cases->nth(i));
-        int cur_label = branchTags[branch->type_decl];
-
-        emit_label_def(cur_label, s);
-        new_location_for_symbol(branch->name, T1, s);
-        branch->expr->code(s);
-        free_symbol_location(branch->name, s);
-    }
-
-    //TODO:revise this!
-    if (case_branch == -1){
-        if (cgen_debug){
-            cout << "!!!!!!! Un-matched branch!" << endl;
+        emit_label_def(label_id, s);
+        NodeList::iterator itNext = it + 1;
+        if (itNext != itEnd){
+            int next_label = branchTags[(*itNext)->get_name()].first;
+            emit_load(T2, 0, ACC, s);
+            emit_blti(T2, tagId.first, next_label, s);
+            emit_bgti(T2, tagId.first, next_label, s);
+            new_location_for_symbol(branch->name, T1, s);
+            branch->expr->code(s);
+            free_symbol_location(branch->name, s);
+        }else{
+            emit_jal("_case_abort", s);
         }
-        emit_jal("_case_abort", s);
-    }   
-
+    }
 
     s << "\t#$$ typecase end..." << endl;
 }

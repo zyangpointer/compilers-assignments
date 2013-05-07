@@ -13,7 +13,8 @@ enum Basicness     {Basic, NotBasic};
 class CgenClassTable;
 typedef CgenClassTable *CgenClassTableP;
 
-typedef std::vector<std::pair<Symbol, size_t> > ClassTagTable;
+typedef std::pair<size_t, size_t> TagIdInfo; //<selfid, max child id>
+typedef std::map<Symbol, TagIdInfo> ClassTagTable;
 
 class CgenNode;
 typedef CgenNode *CgenNodeP;
@@ -75,6 +76,7 @@ public:
 typedef std::pair<Symbol, Symbol> FeatureInfo; // <name, decltype/rettype>
 typedef std::vector<std::pair<CgenNodeP, FeatureInfo> > FeatureNameList;
 typedef std::vector<CgenNodeP>   AncestorList;
+typedef std::vector<CgenNodeP>   NodeList;
 
 //attribute offset
 typedef std::map<Symbol, size_t> AttributeMap; //<name, offset>
