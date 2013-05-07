@@ -860,8 +860,6 @@ void CgenClassTable::build_class_tags(){
 void CgenClassTable::assign_tags(CgenNode* node, size_t& curId){
     //max child id will be updated later
     m_tagIdList[node->get_name()] = std::make_pair(curId, curId);
-    curId++;
-
     if (node->basic()){
         if (node->get_name() == Object)
             objectclasstag = curId;
@@ -875,6 +873,7 @@ void CgenClassTable::assign_tags(CgenNode* node, size_t& curId){
             intclasstag = curId;
     }
     
+    curId++;
     for(List<CgenNode> *l = node->get_children(); l; l = l->tl()){
         CgenNode* child = l->hd();
         assign_tags(child, curId);
