@@ -1854,8 +1854,9 @@ void loop_class::code(ostream &s) {
 
 
 namespace{
+    //compare by own tag id, in reverse order: child first
     bool cmp_by_tag(ClassTagTable& tagIdList, CgenNode* cls1, CgenNode* cls2){
-        return (tagIdList[cls1->get_name()].second) > (tagIdList[cls2->get_name()].second);
+        return (tagIdList[cls1->get_name()].first) > (tagIdList[cls2->get_name()].first);
     }
 }
 
@@ -1884,31 +1885,40 @@ void typcase_class::code(ostream &s) {
         options.push_back(g_clsTablePtr->lookup(branch->type_decl));
     }
 
+    int label_bad_type = next_lable_id++;
+    int label_join = next_lable_id++;
+
     //sorted by tag id now
     std::sort(options.begin(), options.end(), std::tr1::bind(cmp_by_tag, g_clsTablePtr->m_tagIdList,
             std::tr1::placeholders::_1, std::tr1::placeholders::_2));
     for (NodeList::iterator it = options.begin(), itEnd = options.end();
             it != itEnd; ++it){
         Symbol type_decl = (*it)->get_name();
+        if (cgen_debug){
+            cout << "###### generating code for branch type:" << type_decl << endl;
+        }
         int label_id = branchTags[type_decl].first;
         branch_class* branch = branchTags[type_decl].second;
         TagIdInfo& tagId = g_clsTablePtr->m_tagIdList[type_decl];
 
         emit_label_def(label_id, s);
-        NodeList::iterator itNext = it + 1;
-        if (itNext != itEnd){
-            int next_label = branchTags[(*itNext)->get_name()].first;
-            emit_load(T2, 0, ACC, s);
-            emit_blti(T2, tagId.first, next_label, s);
-            emit_bgti(T2, tagId.first, next_label, s);
-            new_location_for_symbol(branch->name, T1, s);
-            branch->expr->code(s);
-            free_symbol_location(branch->name, s);
-        }else{
-            emit_jal("_case_abort", s);
+        int nextLabel = label_bad_type;
+        if ((it+1) != itEnd){
+            nextLabel = branchTags[(*(it+1))->get_name()].first;
         }
+
+        emit_load(T2, 0, ACC, s);
+        emit_blti(T2, tagId.first, nextLabel, s);
+        emit_bgti(T2, tagId.first, nextLabel, s);
+        new_location_for_symbol(branch->name, T1, s);
+        branch->expr->code(s);
+        free_symbol_location(branch->name, s);
+        emit_branch(label_join, s);
     }
 
+    emit_label_def(label_bad_type, s);
+    emit_jal("_case_abort", s);
+    emit_label_def(label_join, s);
     s << "\t#$$ typecase end..." << endl;
 }
 
