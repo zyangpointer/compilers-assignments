@@ -928,35 +928,45 @@ CgenNodeP CgenClassTable::root()
 }
 
 
+namespace{
+    //compare by own tag id, in reverse order: child first
+    bool cmp_by_tag_reverse(ClassTagTable& tagIdList, CgenNode* cls1, CgenNode* cls2){
+        return (tagIdList[cls1->get_name()].first) > (tagIdList[cls2->get_name()].first);
+    }
+    bool cmp_by_tag(ClassTagTable& tagIdList, CgenNode* cls1, CgenNode* cls2){
+        return (tagIdList[cls1->get_name()].first) < (tagIdList[cls2->get_name()].first);
+    }
+}
+
 void CgenClassTable::code_class_nameTab(){
     //classname table should be organized by classtag id sequence
     str << CLASSNAMETAB << LABEL;
 
-    std::ostringstream strm;
-    /*
-    //builtin first by id sequences
-    Symbol basics[] = {Object, IO, Int, Bool, Str};
-    for (size_t i = 0; i < sizeof(basics)/sizeof(basics[0]); ++i){
-    strm.str("");strm.clear();
-    strm << basics[i];
-    if (cgen_debug) cout << "<<< checking builtin class " << strm.str() << endl; 
-    StringEntryP entry = stringtable.lookup_string(const_cast<char*>(strm.str().c_str()));
-    str << "\t#class name = " << strm.str() << endl;
-    str << WORD;
-    entry->code_ref(str);
-    str << endl;
+    //name table should be in sorted order by tag id
+    NodeList nodes;
+    for(List<CgenNode> *l = nds; l; l = l->tl()){
+        nodes.push_back(l->hd());
     }
-    */
+    std::sort(nodes.begin(), nodes.end(), std::tr1::bind(cmp_by_tag, m_tagIdList, 
+                std::tr1::placeholders::_1, std::tr1::placeholders::_2));
 
-    for (ClassTagTable::iterator it = m_tagIdList.begin(), itEnd = m_tagIdList.end();
-            it != itEnd; ++it){
-        strm.clear();strm.str("");
-        strm << it->first;
-        StringEntryP entry = stringtable.lookup_string(const_cast<char*>(strm.str().c_str()));
-        str << "\t#class name = " << strm.str() << endl;
-        str << WORD;
-        entry->code_ref(str);
-        str << endl;
+    std::ostringstream strm;
+    for (size_t i = 0; i < nodes.size(); ++i){
+        CgenNodeP node = nodes[i];
+        ClassTagTable::iterator it = m_tagIdList.find(node->get_name());
+        if (it == m_tagIdList.end()){
+            if (cgen_debug){
+                cout << "!!!!!! bad, node tag not found for " << node->get_name() << endl;
+            }
+        }else{
+            strm.clear();strm.str("");
+            strm << it->first;
+            StringEntryP entry = stringtable.lookup_string(const_cast<char*>(strm.str().c_str()));
+            str << "\t#class name = " << strm.str() << endl;
+            str << WORD;
+            entry->code_ref(str);
+            str << endl;
+        }
     }
 }
 
@@ -1853,13 +1863,6 @@ void loop_class::code(ostream &s) {
 }
 
 
-namespace{
-    //compare by own tag id, in reverse order: child first
-    bool cmp_by_tag(ClassTagTable& tagIdList, CgenNode* cls1, CgenNode* cls2){
-        return (tagIdList[cls1->get_name()].first) > (tagIdList[cls2->get_name()].first);
-    }
-}
-
 void typcase_class::code(ostream &s) {
     s << "\t#$$ typecase begin..." << endl;
 
@@ -1889,7 +1892,7 @@ void typcase_class::code(ostream &s) {
     int label_join = next_lable_id++;
 
     //sorted by tag id now
-    std::sort(options.begin(), options.end(), std::tr1::bind(cmp_by_tag, g_clsTablePtr->m_tagIdList,
+    std::sort(options.begin(), options.end(), std::tr1::bind(cmp_by_tag_reverse, g_clsTablePtr->m_tagIdList,
             std::tr1::placeholders::_1, std::tr1::placeholders::_2));
     for (NodeList::iterator it = options.begin(), itEnd = options.end();
             it != itEnd; ++it){
