@@ -18,8 +18,15 @@ typedef std::map<Symbol, TagIdInfo> ClassTagTable;
 
 class CgenNode;
 typedef CgenNode *CgenNodeP;
+
+typedef std::pair<Symbol, Symbol> FeatureInfo; // <name, decltype/rettype>
+typedef std::vector<std::pair<CgenNodeP, FeatureInfo> > FeatureNameList;
+typedef std::vector<CgenNodeP>   AncestorList;
+typedef std::vector<CgenNodeP>   NodeList;
+
 class CgenClassTable : public SymbolTable<Symbol,CgenNode> {
 private:
+    NodeList m_allNodes;
    List<CgenNode> *nds;
    ostream& str;
 
@@ -72,11 +79,6 @@ public:
    ClassTagTable m_tagIdList;
 };
 
-
-typedef std::pair<Symbol, Symbol> FeatureInfo; // <name, decltype/rettype>
-typedef std::vector<std::pair<CgenNodeP, FeatureInfo> > FeatureNameList;
-typedef std::vector<CgenNodeP>   AncestorList;
-typedef std::vector<CgenNodeP>   NodeList;
 
 //attribute offset
 typedef std::map<Symbol, size_t> AttributeMap; //<name, offset>

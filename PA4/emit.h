@@ -70,6 +70,7 @@
 #define A2   "$a2"		
 #define A3   "$a3"		
 #define SELF "$s0"		// Ptr to self (callee saves) 
+#define S1   "$s1"		
 #define T1   "$t1"		// Temporary 1 
 #define T2   "$t2"		// Temporary 2 
 #define T3   "$t3"		// Temporary 3 

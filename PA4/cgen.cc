@@ -942,16 +942,15 @@ void CgenClassTable::code_class_nameTab(){
     str << CLASSNAMETAB << LABEL;
 
     //name table should be in sorted order by tag id
-    NodeList nodes;
     for(List<CgenNode> *l = nds; l; l = l->tl()){
-        nodes.push_back(l->hd());
+        m_allNodes.push_back(l->hd());
     }
-    std::sort(nodes.begin(), nodes.end(), std::tr1::bind(cmp_by_tag, m_tagIdList, 
+    std::sort(m_allNodes.begin(), m_allNodes.end(), std::tr1::bind(cmp_by_tag, m_tagIdList, 
                 std::tr1::placeholders::_1, std::tr1::placeholders::_2));
 
     std::ostringstream strm;
-    for (size_t i = 0; i < nodes.size(); ++i){
-        CgenNodeP node = nodes[i];
+    for (size_t i = 0; i < m_allNodes.size(); ++i){
+        CgenNodeP node = m_allNodes[i];
         ClassTagTable::iterator it = m_tagIdList.find(node->get_name());
         if (it == m_tagIdList.end()){
             if (cgen_debug){
@@ -971,10 +970,10 @@ void CgenClassTable::code_class_nameTab(){
 
 void CgenClassTable::code_class_objTab(){
     str << CLASSOBJTAB << LABEL;
-    for(List<CgenNode> *l = nds; l; l = l->tl()){
-        CgenNode* hdr = l->hd();
-        str << WORD << hdr->get_name() << PROTOBJ_SUFFIX << endl;
-        str << WORD << hdr->get_name() << CLASSINIT_SUFFIX << endl;
+    for (size_t i = 0; i < m_allNodes.size(); ++i){
+        CgenNodeP node = m_allNodes[i];
+        str << WORD << node->get_name() << PROTOBJ_SUFFIX << endl;
+        str << WORD << node->get_name() << CLASSINIT_SUFFIX << endl;
     }
 }
 
@@ -2146,13 +2145,22 @@ void new__class::code(ostream &s) {
     s << "\t#<<< new object begin :" << type_name << endl;
     CgenNode* clsPtr = g_clsTablePtr->lookup(type_name);
     if (type_name == SELF_TYPE){
-        clsPtr = g_clsTablePtr->lookup(self);
+        //locate the  init method offset - note the objTab is sorted by tag id
+        emit_load_address(T1, CLASSOBJTAB, s);
+        emit_load(T2, 0, SELF, s); //obj tag
+        emit_sll(T2, T2, 3, s);
+        emit_add(T1, T1, T2, s); 
+        emit_move(S1, T1, s);
+        emit_load(ACC, 0, T1, s); //prot obj
+        emit_jal("Object.copy", s);
+        s << LW << T1 << " 4(" << S1 << ")" << endl;
+        emit_jalr(T1, s);
+    }else{
+        emit_partial_load_address(ACC, s);
+        s << clsPtr->name << PROTOBJ_SUFFIX << endl;
+        emit_jal("Object.copy", s);
+        s << JAL << clsPtr->name << CLASSINIT_SUFFIX << endl;
     }
-
-    emit_partial_load_address(ACC, s);
-    s << clsPtr->name << PROTOBJ_SUFFIX << endl;
-    emit_jal("Object.copy", s);
-    s << JAL << clsPtr->name << CLASSINIT_SUFFIX << endl;
     s << "\t#>>> new object end " << endl;
 }
 
