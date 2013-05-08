@@ -1857,7 +1857,8 @@ void loop_class::code(ostream &s) {
 
     //do nothing for false
     emit_label_def(false_label, s);
-    s << "\t# <<< false branch do nothing..." << endl;
+    s << "\t# <<< false branch save $0 in $a0 ..." << endl;
+    emit_move(ACC, ZERO, s);
     //emit_restore_temp_registers(s);
 }
 
@@ -1951,7 +1952,8 @@ void let_class::code(ostream &s) {
             //Load zero here!
             emit_move(ACC, ZERO, s);
         }
-    }
+    }    
+    
     new_location_for_symbol(identifier, ACC, s);
     s << "\t#<<< let body ..." << endl;
     body->code(s);
