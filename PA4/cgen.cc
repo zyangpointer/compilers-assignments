@@ -1549,7 +1549,7 @@ void assign_class::code(ostream &s) {
 
 
 namespace{
-    void dispatch_common(Expression expr, Symbol name, Expressions actual, Symbol obj_type, ostream& s){    
+    void dispatch_common(Expression expr, Symbol name, Expressions actual, Symbol obj_type, ostream& s, bool dynamic){    
         int numOfArgs = actual->len();
         int numOfArgRegs = numOfArgs > 3 ? 3 : numOfArgs;
 
@@ -1628,7 +1628,7 @@ namespace{
                 //check for name conflicts
                 formal_class* formal = dynamic_cast<formal_class*>(formals->nth(i));
                 if (g_varTable.find(formal->name) == g_varTable.end()){
-                    s << "\t# <<< " << name << "- add new name " << formal->name << " to scope now..." << endl;
+                    s << "\t# <<< " << name << "- 4. add new name " << formal->name << " to scope now..." << endl;
                 }else{
                     //save old address info since the place would be overwritten!!!
                     std::ostringstream strm;
@@ -1645,11 +1645,28 @@ namespace{
                     }
                 }
             }
+        }
 
-            //4. Update name location, allocate new space from stack
+        //4. set new s0 since self can only change here!
+        s << "\t#<<< " << name << " - 4. evaluate and set new $s0 ..." << endl;
+        emit_addiu(SP, SP, -12, s);
+        emit_store(A1, 3, SP, s);
+        emit_store(A2, 2, SP, s);
+        emit_store(A3, 1, SP, s);
+        g_current_sp_offset += 3;
+        expr->code(s);
+        emit_move(SELF, ACC, s);
+        emit_load(A1, 3, SP, s);
+        emit_load(A2, 2, SP, s);
+        emit_load(A3, 1, SP, s);
+        emit_addiu(SP, SP, 12, s);
+        g_current_sp_offset -= 3;
+
+        //5. Update name location, allocate new space from stack as needed
+        if (numOfArgs > 0){
             size_t last_arg_offset = g_current_sp_offset;
             g_current_sp_offset += ((numOfArgs > 3) ? numOfArgs : 0);
-            s << "\t# <<< " << name << " - allocate " << (g_current_sp_offset - last_arg_offset) 
+            s << "\t# <<< " << name << " - 5. allocate " << (g_current_sp_offset - last_arg_offset) 
               << " more space for formal names " << endl; 
             for (int i = 0; i < numOfArgs; ++i){
                 formal_class* formal = dynamic_cast<formal_class*>(formals->nth(i));
@@ -1680,25 +1697,10 @@ namespace{
             }
         }
 
-        //5. set new s0 since self can only change here!
-        s << "\t#<<< " << name << " - evaluate and set new $s0 ..." << endl;
-        emit_addiu(SP, SP, -12, s);
-        emit_store(A1, 3, SP, s);
-        emit_store(A2, 2, SP, s);
-        emit_store(A3, 1, SP, s);
-        g_current_sp_offset += 3;
-        expr->code(s);
-        emit_move(SELF, ACC, s);
-        emit_load(A1, 3, SP, s);
-        emit_load(A2, 2, SP, s);
-        emit_load(A3, 1, SP, s);
-        emit_addiu(SP, SP, 12, s);
-        g_current_sp_offset -= 3;
-
         s << "\t#<<< " << name << " - do the call ..." << endl;
         //call function
         size_t method_offset = clsPtr->get_method_offset(name);
-        if (cgen_debug) cout << "get method offset for:" << name << " from class:" << clsPtr->name << ",offset=" << method_offset << endl;
+        //if (cgen_debug) cout << "get method offset for:" << name << " from class:" << clsPtr->name << ",offset=" << method_offset << endl;
 
         int dispatch_call = next_lable_id++;    
         emit_bne(SELF, ZERO, dispatch_call, s);
@@ -1709,8 +1711,11 @@ namespace{
         emit_jal("_dispatch_abort", s);
 
         emit_label_def(dispatch_call, s);
-        //Locate the actual type's protObj dispTab
-        s << LA << T1 << " " << clsPtr->name << DISPTAB_SUFFIX << endl;
+        if (dynamic){
+            emit_load(T1, 2, SELF, s);
+        }else{
+            s << LA << T1 << " " << clsPtr->name << DISPTAB_SUFFIX << endl;
+        }
         emit_load(T1, method_offset, T1, s);
         emit_jalr(T1, s);
 
@@ -1791,7 +1796,7 @@ namespace{
 
 
 void static_dispatch_class::code(ostream &s) {
-    dispatch_common(expr, name, actual, type_name, s);
+    dispatch_common(expr, name, actual, type_name, s, false);
 }
 
 void dispatch_class::code(ostream &s) {
@@ -1804,9 +1809,9 @@ void dispatch_class::code(ostream &s) {
         type = cls->name;
     }
     if (cgen_debug){
-        cout << "dispatch on expr type:" << type << endl;
+        cout << "dispatch on expr type:" << type << " for function " << name << endl;
     }
-    dispatch_common(expr, name, actual, type, s);
+    dispatch_common(expr, name, actual, type, s, true);
 }
 
 void cond_class::code(ostream &s) {
@@ -2066,11 +2071,11 @@ void eq_class::code(ostream &s) {
     //now e1 in T1, e2 in a0
     int true_label = next_lable_id++;
     int false_label = next_lable_id++;
+    int joint_label = next_lable_id++;
     s << "\t# @@@ check pointer address first..." << endl;
     emit_beq(T1, T2, true_label, s);
     emit_beq(T1, ZERO, false_label, s);
     emit_beq(T2, ZERO, false_label, s);
-    s << "\t# @@@ check contained object now..." << endl;
     if (e1->get_type() == Int || e1->get_type() == Bool){
         s << "\t#<< compare Int/Bool contents..." << endl;
         emit_load(T1, first_attr_offset, T1, s);
@@ -2086,9 +2091,10 @@ void eq_class::code(ostream &s) {
         emit_load(T4, first_attr_offset + 1, T2, s);
         emit_bne(T3, T4, false_label, s);
         emit_branch(true_label, s);
+    }else{
+        emit_branch(false_label, s);
     }
 
-    int joint_label = next_lable_id++;
     emit_label_def(true_label, s);
     emit_load_bool(ACC, truebool, s);
     emit_branch(joint_label, s);
