@@ -1077,16 +1077,17 @@ namespace{
         if (!cls){
             assert(!"Bad scope for object class!");
         }
-        size_t offset = cls->get_attr_offset(name);
-        if (offset == 0){
-            if (g_varTable.find(name) != g_varTable.end()){
-                load_reg_from_symbol_location(ACC, name, s);
-            }else{
-                assert(!"name not found in class or varTable!");
-            }
+        if (g_varTable.find(name) != g_varTable.end()){
+            s << "\t# <<< load variable name: " << name << endl;
+            load_reg_from_symbol_location(ACC, name, s);
         }else{
-            s << "\t# <<< load attribute name: " << name << endl;
-            emit_load(ACC, offset, SELF, s);
+            size_t offset = cls->get_attr_offset(name);
+            if (offset == 0){
+                assert(!"name not found in class or varTable!");
+            }else{
+                s << "\t# <<< load attribute name: " << name << endl;
+                emit_load(ACC, offset, SELF, s);
+            }
         }
     }
 }
@@ -1552,23 +1553,25 @@ void assign_class::code(ostream &s) {
     if (!cls){
         assert(!"Bad scope for object class!");
     }
-    size_t offset = cls->get_attr_offset(name);
-    if (offset == 0){
-        if (g_varTable.find(name) != g_varTable.end()){
-            RegAddrInfo& info = g_varTable[name];
-            if (info.location == LOC_FP){
-                s << SW << ACC << " " << -1 * info.offset * WORD_SIZE << "(" << FP << ")" << endl;
-            }else if (info.location == LOC_ARG){
-                s << MOVE << "$a" << info.offset << " " << ACC << endl;
-            }else if (info.location == LOC_TEMP){
-                s << MOVE << "$t" << info.offset << " " << ACC << endl;
-            }
-        }else{
+
+    if (g_varTable.find(name) != g_varTable.end()){
+        RegAddrInfo& info = g_varTable[name];
+        if (info.location == LOC_FP){
+            s << SW << ACC << " " << -1 * info.offset * WORD_SIZE << "(" << FP << ")" << endl;
+        }else if (info.location == LOC_ARG){
+            s << MOVE << "$a" << info.offset << " " << ACC << endl;
+        }else if (info.location == LOC_TEMP){
+            s << MOVE << "$t" << info.offset << " " << ACC << endl;
+        }
+        //return target in a0
+    }else{
+        size_t offset = cls->get_attr_offset(name);
+        if (offset == 0){
             assert(!"Name lookup error!");
             return;
+        }else{
+            emit_store(ACC, offset, SELF, s);
         }
-    }else{
-        emit_store(ACC, offset, SELF, s);
     }
 
     s << "\t# Assign end..." << endl;
@@ -1634,19 +1637,7 @@ namespace{
                 strm << "_value_of_" << formal->name;
                 std::string vnamestr = strm.str();
                 Symbol vName = stringtable.add_string(strdup(vnamestr.c_str()));
-                std::string hidName = std::string("_hidden_") + vnamestr;
-                Symbol hidSymName = stringtable.add_string(strdup(hidName.c_str()));
-                if (cgen_debug) cout << name << ": Adding hidden sym:" << hidName << endl;
-                if (g_varTable.find(vName) != g_varTable.end()){
-                    s << "\t# <<< " << name << " value object:" << formal->name 
-                        << " already exist, do backup for later restore now..." << endl;
-                    g_varTable[hidSymName] = g_varTable[vName];
-                    new_location_for_symbol(vName, ACC, s);
-                }else{
-                    s << "\t#<<< " << name << " argument value:" <<  strm.str()
-                        << " will be saved to FP offset " << g_current_sp_offset << endl;
-                    new_location_for_symbol(vName, ACC, s);
-                }
+                add_scoped_symbol_from_reg(vName, ACC, s);
             }
 
             //3. Formal name objects intended for stack name handling - save old name if needed
@@ -1787,23 +1778,8 @@ namespace{
                 std::ostringstream strm;
                 strm << "_value_of_" << symName;
                 std::string vnamestr = strm.str();
-                std::string hidName = std::string("_hidden_") + vnamestr;
-
-                Symbol hidSym = stringtable.lookup_string(const_cast<char*>(hidName.c_str()));
                 Symbol vSym = stringtable.lookup_string(const_cast<char*>(vnamestr.c_str()));
-                if (g_varTable.find(hidSym) != g_varTable.end()){
-                    s << "\t# >>> value of name: " <<  vSym << " restored now, new space freed now!" << endl;
-                    //restore
-                    free_symbol_location(vSym, s);
-                    g_varTable[vSym] = g_varTable[hidSym];
-                    g_varTable.erase(hidSym);
-                }else{
-                    //erase
-                    //stack space needs to be freed
-                    s << "\t# >>> value of name: " <<  vSym << " space freed now!" << endl;
-                    free_symbol_location(vSym, s);
-                    g_varTable.erase(vSym);
-                }
+                erase_symbol_from_scope(vSym, s);
             }
         }
 
@@ -1945,9 +1921,9 @@ void typcase_class::code(ostream &s) {
         emit_load(T2, 0, ACC, s);
         emit_blti(T2, tagId.first, nextLabel, s);
         emit_bgti(T2, tagId.first, nextLabel, s);
-        new_location_for_symbol(branch->name, T1, s);
+        add_scoped_symbol_from_reg(branch->name, T1, s);
         branch->expr->code(s);
-        free_symbol_location(branch->name, s);
+        erase_symbol_from_scope(branch->name, s);
         emit_branch(label_join, s);
     }
 
@@ -1970,6 +1946,7 @@ void let_class::code(ostream &s) {
     s << "\t# let statement begin..." << endl;
     s << "\t#<<< let init ..." << endl;
     init->code(s);
+    s << "\t#<<< let init code done ..." << endl;
     if (init->get_type() == NULL){
         if (cgen_debug)
             cout << "<<< let statement, init type:" << (init->get_type() ? init->get_type() : No_type) << endl;
@@ -1984,16 +1961,16 @@ void let_class::code(ostream &s) {
             //Load zero here!
             emit_move(ACC, ZERO, s);
         }
-    }    
+    }else{
+        //return value already in $a0
+    }
     
-    //new_location_for_symbol(identifier, ACC, s);
     add_scoped_symbol_from_reg(identifier, ACC, s);
     s << "\t#<<< let body ..." << endl;
     body->code(s);
 
     s << "\t#<<< pop out the symbol ..." << endl;
     erase_symbol_from_scope(identifier, s);
-    //free_symbol_location(identifier, s);
 
     s << "\t# let statement end..." << endl;
     g_clsTablePtr->exitscope();
