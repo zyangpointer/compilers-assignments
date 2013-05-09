@@ -1007,12 +1007,40 @@ namespace{
         emit_addiu(SP, SP, -4, s);
     }
 
+    void add_scoped_symbol_from_reg(Symbol name, char* reg, ostream& s){
+        if (g_varTable.find(name) != g_varTable.end()){
+            //should back up and allocate new
+            std::ostringstream strm;
+            strm << "_hidden_" << name;
+            std::string hidName = strm.str();
+            Symbol hidSymName = stringtable.add_string(strdup(hidName.c_str()));
+            if (cgen_debug) cout << name << ": Adding hidden sym:" << hidName << endl;
+            s << "\t# <<< " << name << " object:" << name 
+                << " already exist in scope, do backup for later restore now..." << endl;
+            g_varTable[hidSymName] = g_varTable[name];
+        }
+        new_location_for_symbol(name, reg, s);
+    }
+
     void free_symbol_location(Symbol name, ostream& s){
         if (g_varTable.find(name) != g_varTable.end()){
             RegAddrInfo& addr = g_varTable[name];
             g_current_sp_offset--;
             emit_addiu(SP, SP, 4, s);
         }
+    }
+
+    void erase_symbol_from_scope(Symbol name, ostream& s){
+        std::ostringstream strm;
+        strm << "_hidden_" << name;
+        std::string hidName = strm.str();
+        Symbol hidSymName = stringtable.add_string(strdup(hidName.c_str()));
+
+        free_symbol_location(name, s);
+        if (g_varTable.find(hidSymName) != g_varTable.end()){
+            g_varTable[name] = g_varTable[hidSymName];
+            g_varTable.erase(hidSymName);
+        }    
     }
 
     //save register value to symbol location
@@ -1958,12 +1986,14 @@ void let_class::code(ostream &s) {
         }
     }    
     
-    new_location_for_symbol(identifier, ACC, s);
+    //new_location_for_symbol(identifier, ACC, s);
+    add_scoped_symbol_from_reg(identifier, ACC, s);
     s << "\t#<<< let body ..." << endl;
     body->code(s);
 
     s << "\t#<<< pop out the symbol ..." << endl;
-    free_symbol_location(identifier, s);
+    erase_symbol_from_scope(identifier, s);
+    //free_symbol_location(identifier, s);
 
     s << "\t# let statement end..." << endl;
     g_clsTablePtr->exitscope();
