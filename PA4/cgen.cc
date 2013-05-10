@@ -1010,7 +1010,6 @@ namespace{
         emit_addiu(SP, SP, -4, s);
     }
 
-    //TODO: using scope list to save those names!
     void add_scoped_symbol_from_reg(Symbol name, char* reg, ostream& s){
         if (g_varTable.find(name) != g_varTable.end()){
             //should back up and allocate new
@@ -1025,8 +1024,10 @@ namespace{
     void free_symbol_location(Symbol name, ostream& s){
         if (g_varTable.find(name) != g_varTable.end()){
             RegAddrInfo& addr = g_varTable[name];
-            g_current_sp_offset--;
-            emit_addiu(SP, SP, 4, s);
+            if (addr.location == LOC_FP){
+                g_current_sp_offset--;
+                emit_addiu(SP, SP, 4, s);
+            }
         }
     }
 
@@ -1034,15 +1035,18 @@ namespace{
         free_symbol_location(name, s);
         if (g_hiddenTable.find(name) != g_hiddenTable.end()){
             HiddenList& backup = g_hiddenTable[name];
-            if (backup.size() != 0){
-                s << "\t#<<<<<< restored name " << name << endl;
-                g_varTable[name] = backup[0];
-                return;
-            }else{
+            assert(backup.size());
+
+            s << "\t#<<<<<< restored name " << name << endl;
+            g_varTable[name] = backup[0];
+            backup.erase(backup.begin());
+
+            if (backup.empty()){
                 g_hiddenTable.erase(name);
             }
+        }else{
+            g_varTable.erase(name);
         }
-        g_varTable.erase(name);
     }
 
     //save register value to symbol location
