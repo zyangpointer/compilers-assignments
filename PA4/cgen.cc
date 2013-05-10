@@ -1007,6 +1007,7 @@ namespace{
         emit_addiu(SP, SP, -4, s);
     }
 
+    //TODO: using scope list to save those names!
     void add_scoped_symbol_from_reg(Symbol name, char* reg, ostream& s){
         if (g_varTable.find(name) != g_varTable.end()){
             //should back up and allocate new
@@ -1015,9 +1016,10 @@ namespace{
             std::string hidName = strm.str();
             Symbol hidSymName = stringtable.add_string(strdup(hidName.c_str()));
             if (cgen_debug) cout << name << ": Adding hidden sym:" << hidName << endl;
-            s << "\t# <<< " << name << " object:" << name 
-                << " already exist in scope, do backup for later restore now..." << endl;
+            s << "\t#<<<<<< Symbol " << name << " already exist in scope, do backup for later restore now..." << endl;
             g_varTable[hidSymName] = g_varTable[name];
+        }else{
+            s << "\t#<<<<<< Symbol " << name << " added to scope nw" << endl;
         }
         new_location_for_symbol(name, reg, s);
     }
@@ -1038,6 +1040,7 @@ namespace{
 
         free_symbol_location(name, s);
         if (g_varTable.find(hidSymName) != g_varTable.end()){
+            s << "\t#<<<<<< restored name " << name << endl;
             g_varTable[name] = g_varTable[hidSymName];
             g_varTable.erase(hidSymName);
         }    
@@ -1564,6 +1567,7 @@ void assign_class::code(ostream &s) {
             s << MOVE << "$t" << info.offset << " " << ACC << endl;
         }
         //return target in a0
+        s << "\t# Assign " << name << " in registers " << endl;
     }else{
         size_t offset = cls->get_attr_offset(name);
         if (offset == 0){
@@ -1572,6 +1576,7 @@ void assign_class::code(ostream &s) {
         }else{
             emit_store(ACC, offset, SELF, s);
         }
+        s << "\t# Assign " << name << " in self attribute offset " << offset << endl;
     }
 
     s << "\t# Assign end..." << endl;
