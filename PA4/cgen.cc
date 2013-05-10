@@ -122,10 +122,13 @@ namespace{
         unsigned short location;  // 0 - fp (fp + offset), 1 - a1, a2, a3, 2 - t0, t1, ..t9
         unsigned short offset; 
     }RegAddrInfo;
+    typedef std::vector<RegAddrInfo> HiddenList;
     typedef std::map<Symbol, RegAddrInfo> VarAddrTable;
+    typedef std::map<Symbol, HiddenList> BackupAddrTable;
 
     //variable table to svae locations for arguments and temporaries
     VarAddrTable g_varTable;
+    BackupAddrTable g_hiddenTable;
     size_t g_current_sp_offset = 0; //sp - fp
     CgenClassTable* g_clsTablePtr;
 
@@ -1011,13 +1014,8 @@ namespace{
     void add_scoped_symbol_from_reg(Symbol name, char* reg, ostream& s){
         if (g_varTable.find(name) != g_varTable.end()){
             //should back up and allocate new
-            std::ostringstream strm;
-            strm << "_hidden_" << name;
-            std::string hidName = strm.str();
-            Symbol hidSymName = stringtable.add_string(strdup(hidName.c_str()));
-            if (cgen_debug) cout << name << ": Adding hidden sym:" << hidName << endl;
             s << "\t#<<<<<< Symbol " << name << " already exist in scope, do backup for later restore now..." << endl;
-            g_varTable[hidSymName] = g_varTable[name];
+            g_hiddenTable[name].push_back(g_varTable[name]);
         }else{
             s << "\t#<<<<<< Symbol " << name << " added to scope nw" << endl;
         }
@@ -1033,17 +1031,18 @@ namespace{
     }
 
     void erase_symbol_from_scope(Symbol name, ostream& s){
-        std::ostringstream strm;
-        strm << "_hidden_" << name;
-        std::string hidName = strm.str();
-        Symbol hidSymName = stringtable.add_string(strdup(hidName.c_str()));
-
         free_symbol_location(name, s);
-        if (g_varTable.find(hidSymName) != g_varTable.end()){
-            s << "\t#<<<<<< restored name " << name << endl;
-            g_varTable[name] = g_varTable[hidSymName];
-            g_varTable.erase(hidSymName);
-        }    
+        if (g_hiddenTable.find(name) != g_hiddenTable.end()){
+            HiddenList& backup = g_hiddenTable[name];
+            if (backup.size() != 0){
+                s << "\t#<<<<<< restored name " << name << endl;
+                g_varTable[name] = backup[0];
+                return;
+            }else{
+                g_hiddenTable.erase(name);
+            }
+        }
+        g_varTable.erase(name);
     }
 
     //save register value to symbol location
